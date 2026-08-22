@@ -15,8 +15,6 @@ from aiogram.types import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", "8080"))
 
-# Railway normally provides RAILWAY_PUBLIC_DOMAIN.
-# You can also set WEB_URL manually in Railway Variables.
 WEB_URL = os.getenv("WEB_URL")
 
 if not WEB_URL:
@@ -29,7 +27,6 @@ if not WEB_URL:
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is missing")
-
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -45,31 +42,31 @@ def make_play_url(file_id: str) -> str:
 
 
 # =========================
-# /start
+# START
 # =========================
 
 @dp.message(CommandStart())
 async def start(message: Message):
     await message.answer(
-        "🎬 Telegram Video Bot\n\n"
-        "Video ya video file bhejo, main receive karke "
-        "Play Online button dunga.\n\n"
+        "🎬 NIGHT VIDEOS\n\n"
+        "Video ya video file bhejo.\n"
+        "Main aapko Play Online button dunga.\n\n"
         "/start - Start\n"
         "/help - Help"
     )
 
 
 # =========================
-# /help
+# HELP
 # =========================
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
     await message.answer(
-        "📌 Help\n\n"
-        "• Video bhejo → bot receive karega\n"
-        "• Video ke saath ▶️ Play Online button milega\n"
-        "• Button dabao → web video player khulega"
+        "📌 NIGHT VIDEOS Help\n\n"
+        "• Video bhejo\n"
+        "• ▶️ Play Online button dabao\n"
+        "• Android aur iPhone dono par play karo"
     )
 
 
@@ -110,13 +107,14 @@ async def send_received(
     await message.answer(
         "✅ Video received!\n"
         f"{size_text}"
+        "🎬 NIGHT VIDEOS\n"
         f"🆔 File ID: {file_id}",
         reply_markup=keyboard,
     )
 
 
 # =========================
-# VIDEO RECEIVED
+# TELEGRAM VIDEO
 # =========================
 
 @dp.message(F.video)
@@ -130,7 +128,7 @@ async def video_received(message: Message):
 
 
 # =========================
-# DOCUMENT / VIDEO FILE
+# DOCUMENT VIDEO
 # =========================
 
 @dp.message(F.document)
@@ -139,10 +137,7 @@ async def document_received(message: Message):
     document = message.document
 
     mime = document.mime_type or ""
-
-    filename = (
-        document.file_name or ""
-    ).lower()
+    filename = (document.file_name or "").lower()
 
     video_extensions = (
         ".mp4",
@@ -170,29 +165,23 @@ async def document_received(message: Message):
     else:
 
         await message.answer(
-            "✅ File received!\n\n"
-            f"📄 Name: "
-            f"{document.file_name or 'unknown'}\n"
-            f"🆔 File ID: "
-            f"{document.file_id}\n\n"
-            "▶️ Play Online sirf video files "
-            "ke liye available hai."
+            "📄 यह video file नहीं है."
         )
 
 
 # =========================
-# HEALTH CHECK
+# HEALTH
 # =========================
 
 async def health(request: web.Request):
 
     return web.Response(
-        text="Telegram Video Bot is running ✅"
+        text="NIGHT VIDEOS is running ✅"
     )
 
 
 # =========================
-# WEB VIDEO PLAYER
+# VIDEO PLAYER
 # =========================
 
 async def player(request: web.Request):
@@ -200,7 +189,6 @@ async def player(request: web.Request):
     file_id = request.query.get("file_id")
 
     if not file_id:
-
         return web.Response(
             text="Missing file_id",
             status=400
@@ -218,46 +206,63 @@ async def player(request: web.Request):
 
 <head>
 
+<meta charset="utf-8">
+
 <meta name="viewport"
 content="width=device-width,initial-scale=1">
 
-<title>Play Online</title>
+<meta name="theme-color" content="#08080c">
+
+<title>NIGHT VIDEOS</title>
 
 <style>
 
+* {{
+    box-sizing: border-box;
+}}
+
 body {{
     margin: 0;
-    background: #0b0b0f;
+    background: #08080c;
     color: white;
     font-family: Arial, sans-serif;
 }}
 
 .wrap {{
     min-height: 100vh;
+    padding: 35px 16px;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
-    padding: 20px;
-    box-sizing: border-box;
 }}
 
 h1 {{
-    margin: 0 0 18px;
-    font-size: 24px;
+    margin: 15px 0 25px;
+    font-size: 28px;
+    text-align: center;
+}}
+
+.player {{
+    width: 100%;
+    max-width: 900px;
+    background: #000;
+    border-radius: 14px;
+    overflow: hidden;
 }}
 
 video {{
-    width: min(100%, 900px);
-    max-height: 80vh;
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 75vh;
     background: #000;
-    border-radius: 14px;
 }}
 
 .note {{
-    margin-top: 12px;
-    color: #aaa;
-    font-size: 13px;
+    margin-top: 16px;
+    color: #999;
+    font-size: 14px;
+    text-align: center;
 }}
 
 </style>
@@ -268,17 +273,24 @@ video {{
 
 <div class="wrap">
 
-<h1>🎬 NIGHT Video Player</h1>
+<h1>🎬 NIGHT VIDEOS</h1>
+
+<div class="player">
 
 <video
+    id="videoPlayer"
     controls
     playsinline
+    webkit-playsinline
     preload="metadata"
+    controlsList="nodownload"
     src="{video_url}">
 </video>
 
+</div>
+
 <div class="note">
-Play Online
+▶️ NIGHT VIDEOS • Play Online
 </div>
 
 </div>
@@ -295,7 +307,8 @@ Play Online
 
 
 # =========================
-# VIDEO STREAM PROXY
+# RANGE VIDEO STREAM
+# iOS + ANDROID SUPPORT
 # =========================
 
 async def stream_video(request: web.Request):
@@ -305,17 +318,15 @@ async def stream_video(request: web.Request):
     file_id = request.query.get("file_id")
 
     if not file_id:
-
         return web.Response(
             text="Missing file_id",
             status=400
         )
 
     if http_session is None:
-
         http_session = aiohttp.ClientSession()
 
-    # Ask Telegram for the real file path
+    # Get Telegram file path
     api_url = (
         f"https://api.telegram.org/"
         f"bot{BOT_TOKEN}/getFile"
@@ -331,7 +342,9 @@ async def stream_video(request: web.Request):
 
             data = await response.json()
 
-    except Exception:
+    except Exception as e:
+
+        print("Telegram API error:", e)
 
         return web.Response(
             text="Could not contact Telegram",
@@ -344,10 +357,7 @@ async def stream_video(request: web.Request):
     ):
 
         return web.Response(
-            text=(
-                "Telegram could not find this file. "
-                "The file may be unavailable."
-            ),
+            text="Telegram file not found",
             status=404
         )
 
@@ -358,48 +368,73 @@ async def stream_video(request: web.Request):
         f"file/bot{BOT_TOKEN}/{file_path}"
     )
 
+    # Browser Range request
+    range_header = request.headers.get("Range")
+
+    headers = {}
+
+    if range_header:
+        headers["Range"] = range_header
+
     try:
 
         async with http_session.get(
             telegram_file_url,
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=None),
         ) as upstream:
 
-            if upstream.status != 200:
+            if upstream.status not in (200, 206):
 
                 return web.Response(
-                    text=(
-                        "Could not download video "
-                        "from Telegram"
-                    ),
+                    text="Could not download video from Telegram",
                     status=502
                 )
 
-            content_type = (
-                upstream.headers.get(
+            response_headers = {
+                "Content-Type": upstream.headers.get(
                     "Content-Type",
                     "video/mp4"
+                ),
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-store",
+            }
+
+            # Important for iOS/Safari
+            if upstream.headers.get("Content-Length"):
+                response_headers["Content-Length"] = (
+                    upstream.headers["Content-Length"]
                 )
-            )
+
+            if upstream.headers.get("Content-Range"):
+                response_headers["Content-Range"] = (
+                    upstream.headers["Content-Range"]
+                )
 
             response = web.StreamResponse(
-                status=200,
-                headers={
-                    "Content-Type": content_type,
-                    "Cache-Control": "no-store",
-                    "Accept-Ranges": "none",
-                },
+                status=upstream.status,
+                headers=response_headers,
             )
 
             await response.prepare(request)
 
-            async for chunk in upstream.content.iter_chunked(
-                1024 * 256
-            ):
+            try:
 
-                await response.write(chunk)
+                async for chunk in upstream.content.iter_chunked(
+                    256 * 1024
+                ):
+                    await response.write(chunk)
 
-            await response.write_eof()
+            except (ConnectionResetError, asyncio.CancelledError):
+
+                raise
+
+            finally:
+
+                try:
+                    await response.write_eof()
+                except Exception:
+                    pass
 
             return response
 
@@ -407,7 +442,9 @@ async def stream_video(request: web.Request):
 
         raise
 
-    except Exception:
+    except Exception as e:
+
+        print("Streaming error:", e)
 
         return web.Response(
             text="Video streaming failed",
@@ -416,7 +453,7 @@ async def stream_video(request: web.Request):
 
 
 # =========================
-# START WEB SERVER
+# WEB SERVER
 # =========================
 
 async def start_web_server():
@@ -473,7 +510,7 @@ async def main():
     await start_web_server()
 
     print(
-        "Telegram bot starting..."
+        "NIGHT VIDEOS bot starting..."
     )
 
     await dp.start_polling(bot)
@@ -491,7 +528,6 @@ if __name__ == "__main__":
             http_session
             and not http_session.closed
         ):
-
             asyncio.run(
                 http_session.close()
             )
