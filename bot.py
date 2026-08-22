@@ -2,9 +2,7 @@ import os
 import asyncio
 from urllib.parse import quote
 
-import aiohttp
 from aiohttp import web
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -14,6 +12,8 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+from pyrogram import Client
+
 
 # =========================================================
 # SETTINGS
@@ -21,15 +21,39 @@ from aiogram.types import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+
 PORT = int(os.getenv("PORT", "8080"))
 
 WEB_URL = os.getenv("WEB_URL")
 
-# AdsGram Interstitial Block ID
 ADSGRAM_BLOCK_ID = os.getenv(
     "ADSGRAM_BLOCK_ID",
     "int-44048"
 )
+
+
+# =========================================================
+# CHECK VARIABLES
+# =========================================================
+
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN environment variable is missing"
+    )
+
+
+if not API_ID:
+    raise RuntimeError(
+        "API_ID environment variable is missing"
+    )
+
+
+if not API_HASH:
+    raise RuntimeError(
+        "API_HASH environment variable is missing"
+    )
 
 
 if not WEB_URL:
@@ -51,37 +75,67 @@ if not WEB_URL:
         )
 
 
-if not BOT_TOKEN:
-
-    raise RuntimeError(
-        "BOT_TOKEN environment variable is missing"
-    )
-
-
 # =========================================================
-# BOT
+# AIROGRAM BOT
 # =========================================================
 
 bot = Bot(
-    BOT_TOKEN
+    token=BOT_TOKEN
 )
 
 dp = Dispatcher()
 
-http_session = None
+
+# =========================================================
+# PYROGRAM MTProto CLIENT
+#
+# IMPORTANT:
+# no_updates=True
+#
+# Aiogram handles bot messages.
+# Pyrogram is ONLY used for large-file streaming.
+# =========================================================
+
+mtproto = Client(
+    "night_videos_mtproto",
+    api_id=int(API_ID),
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    no_updates=True,
+    in_memory=True,
+)
 
 
 # =========================================================
-# CREATE VIDEO URL
+# STREAM SETTINGS
+# =========================================================
+
+CHUNK_SIZE = 1024 * 1024
+
+MAX_RANGE_REQUEST = 16 * 1024 * 1024
+
+
+# =========================================================
+# CREATE PLAY URL
 # =========================================================
 
 def make_play_url(
-    file_id: str
+    file_id: str,
+    size_bytes: int = 0,
+    mime_type: str = "video/mp4",
+    file_name: str = "video.mp4",
 ) -> str:
 
+    params = (
+        f"file_id={quote(file_id, safe='')}"
+        f"&size={int(size_bytes)}"
+        f"&mime={quote(mime_type, safe='')}"
+        f"&name={quote(file_name, safe='')}"
+    )
+
     return (
-        f"{WEB_URL.rstrip('/')}/watch"
-        f"?file_id={quote(file_id, safe='')}"
+        f"{WEB_URL.rstrip('/')}"
+        f"/watch?{params}"
     )
 
 
@@ -89,9 +143,7 @@ def make_play_url(
 # START
 # =========================================================
 
-@dp.message(
-    CommandStart()
-)
+@dp.message(CommandStart())
 async def start(
     message: Message
 ):
@@ -110,9 +162,7 @@ async def start(
 # HELP
 # =========================================================
 
-@dp.message(
-    Command("help")
-)
+@dp.message(Command("help"))
 async def help_cmd(
     message: Message
 ):
@@ -121,10 +171,11 @@ async def help_cmd(
         "📌 NIGHT VIDEOS Help\n\n"
         "1️⃣ Bot ko video bhejo\n"
         "2️⃣ Play Online button dabao\n"
-        "3️⃣ NIGHT VIDEOS Mini App open hoga\n"
-        "4️⃣ Watch Video dabao\n"
-        "5️⃣ Ad show hoga\n"
-        "6️⃣ Ad ke baad video play hoga"
+        "3️⃣ AdsGram ad show ho sakta hai\n"
+        "4️⃣ NIGHT VIDEOS Mini App open hoga\n"
+        "5️⃣ Video online play karo\n\n"
+        "Large videos ke liye MTProto streaming "
+        "use hoti hai."
     )
 
 
@@ -135,7 +186,9 @@ async def help_cmd(
 async def send_received(
     message: Message,
     file_id: str,
-    size_bytes: int = 0
+    size_bytes: int = 0,
+    mime_type: str = "video/mp4",
+    file_name: str = "video.mp4",
 ):
 
     size_mb = (
@@ -146,30 +199,24 @@ async def send_received(
 
 
     play_url = make_play_url(
-        file_id
+        file_id=file_id,
+        size_bytes=size_bytes,
+        mime_type=mime_type,
+        file_name=file_name,
     )
 
 
     keyboard = InlineKeyboardMarkup(
-
         inline_keyboard=[
-
             [
-
                 InlineKeyboardButton(
-
                     text="▶️ Play Online",
-
                     web_app=WebAppInfo(
                         url=play_url
                     )
-
                 )
-
             ]
-
         ]
-
     )
 
 
@@ -183,15 +230,13 @@ async def send_received(
 
 
     await message.answer(
-
         "🌙 NIGHT VIDEOS\n\n"
-        "✅ Video received!\n"
-        f"{size_text}\n"
+        "✅ Video received!\n\n"
+        f"{size_text}"
+        "🚀 Large video streaming enabled\n\n"
         "👇 Video dekhne ke liye "
-        "button dabao.",
-
+        "Play Online dabao.",
         reply_markup=keyboard,
-
     )
 
 
@@ -199,53 +244,59 @@ async def send_received(
 # VIDEO RECEIVED
 # =========================================================
 
-@dp.message(
-    F.video
-)
+@dp.message(F.video)
 async def video_received(
     message: Message
 ):
 
+    video = message.video
+
+
     await send_received(
-
         message=message,
-
-        file_id=message.video.file_id,
-
-        size_bytes=(
-            message.video.file_size
-            or 0
+        file_id=video.file_id,
+        size_bytes=video.file_size or 0,
+        mime_type=(
+            video.mime_type
+            or "video/mp4"
         ),
-
+        file_name=(
+            video.file_name
+            or "video.mp4"
+        ),
     )
 
 
 # =========================================================
-# DOCUMENT / VIDEO FILE
+# DOCUMENT VIDEO RECEIVED
 # =========================================================
 
-@dp.message(
-    F.document
-)
+@dp.message(F.document)
 async def document_received(
     message: Message
 ):
 
     document = message.document
 
+
     mime = (
         document.mime_type
         or ""
     )
 
+
     filename = (
         document.file_name
-        or ""
-    ).lower()
+        or "video"
+    )
+
+
+    filename_lower = (
+        filename.lower()
+    )
 
 
     video_extensions = (
-
         ".mp4",
         ".mkv",
         ".webm",
@@ -255,49 +306,46 @@ async def document_received(
         ".mpeg",
         ".mpg",
         ".3gp",
-
+        ".ts",
+        ".flv",
     )
 
 
-    if (
-
+    is_video = (
         mime.startswith("video/")
-        or filename.endswith(
+        or filename_lower.endswith(
             video_extensions
         )
+    )
 
-    ):
+
+    if is_video:
 
         await send_received(
-
             message=message,
-
             file_id=document.file_id,
-
             size_bytes=(
-                document.file_size
-                or 0
+                document.file_size or 0
             ),
-
+            mime_type=(
+                mime
+                or "video/mp4"
+            ),
+            file_name=filename,
         )
 
     else:
 
         await message.answer(
-
             "📄 File received!\n\n"
-
-            f"Name: "
-            f"{document.file_name or 'unknown'}\n\n"
-
-            "▶️ Play Online sirf video "
-            "files ke liye available hai."
-
+            f"Name: {filename}\n\n"
+            "▶️ Play Online sirf "
+            "video files ke liye available hai."
         )
 
 
 # =========================================================
-# HEALTH
+# HEALTH CHECK
 # =========================================================
 
 async def health(
@@ -305,51 +353,78 @@ async def health(
 ):
 
     return web.Response(
-
         text=(
-            "NIGHT VIDEOS "
-            "is running ✅"
+            "NIGHT VIDEOS is running ✅"
         )
-
     )
 
 
 # =========================================================
-# PLAYER
+# MINI APP PLAYER
 # =========================================================
 
 async def player(
     request: web.Request
 ):
 
-    file_id = request.query.get(
-        "file_id"
+    file_id = (
+        request.query.get(
+            "file_id"
+        )
     )
 
 
     if not file_id:
 
         return web.Response(
-
             text="Missing file_id",
-
             status=400
-
         )
 
 
-    video_url = (
-
-        f"{request.scheme}://"
-        f"{request.host}"
-        f"/stream?file_id="
-        f"{quote(file_id, safe='')}"
-
+    size = int(
+        request.query.get(
+            "size",
+            "0"
+        )
     )
 
 
-    html = f"""
+    mime_type = (
+        request.query.get(
+            "mime",
+            "video/mp4"
+        )
+    )
 
+
+    file_name = (
+        request.query.get(
+            "name",
+            "video.mp4"
+        )
+    )
+
+
+    video_url = (
+        f"{request.scheme}://"
+        f"{request.host}"
+        f"/stream?"
+        f"file_id="
+        f"{quote(file_id, safe='')}"
+        f"&size={size}"
+        f"&mime="
+        f"{quote(mime_type, safe='')}"
+        f"&name="
+        f"{quote(file_name, safe='')}"
+    )
+
+
+    # =====================================================
+    # HTML
+    # =====================================================
+
+    html = f"""
 <!DOCTYPE html>
 
 <html lang="en">
@@ -361,8 +436,8 @@ async def player(
 <meta
     name="viewport"
     content="width=device-width,
-    initial-scale=1.0,
-    viewport-fit=cover"
+             initial-scale=1.0,
+             viewport-fit=cover"
 >
 
 <meta
@@ -373,14 +448,14 @@ async def player(
 <title>NIGHT VIDEOS</title>
 
 
-<!-- Telegram Mini App SDK -->
+<!-- TELEGRAM MINI APP -->
 
 <script
     src="https://telegram.org/js/telegram-web-app.js">
 </script>
 
 
-<!-- AdsGram SDK -->
+<!-- ADSGRAM -->
 
 <script
     src="https://sad.adsgram.ai/js/sad.min.js">
@@ -395,7 +470,6 @@ async def player(
 
 html,
 body {{
-
     margin: 0;
     padding: 0;
 
@@ -418,7 +492,6 @@ body {{
         "Segoe UI",
         Arial,
         sans-serif;
-
 }}
 
 body {{
@@ -426,7 +499,6 @@ body {{
 }}
 
 .container {{
-
     width: 100%;
     min-height: 100vh;
 
@@ -437,20 +509,12 @@ body {{
     align-items: center;
 
     padding:
-        calc(
-            22px +
-            env(safe-area-inset-top)
-        )
+        calc(22px + env(safe-area-inset-top))
         14px
-        calc(
-            28px +
-            env(safe-area-inset-bottom)
-        );
-
+        calc(28px + env(safe-area-inset-bottom));
 }}
 
 .logo {{
-
     width: 74px;
     height: 74px;
 
@@ -470,22 +534,16 @@ body {{
 
     box-shadow:
         0 0 30px
-        rgba(
-            126,
-            55,
-            255,
-            0.45
-        );
+        rgba(126,55,255,0.45);
 
     font-size: 36px;
 
     margin-top: 8px;
-    margin-bottom: 14px;
 
+    margin-bottom: 14px;
 }}
 
 .title {{
-
     margin: 0;
 
     font-size: 30px;
@@ -495,11 +553,9 @@ body {{
     letter-spacing: 0.5px;
 
     text-align: center;
-
 }}
 
 .subtitle {{
-
     margin-top: 7px;
 
     color: #a7a7b5;
@@ -507,11 +563,9 @@ body {{
     font-size: 14px;
 
     text-align: center;
-
 }}
 
 .player-card {{
-
     width: 100%;
 
     max-width: 1000px;
@@ -522,21 +576,16 @@ body {{
 
     background: #0d0d12;
 
-    border:
-        1px solid #252531;
+    border: 1px solid #252531;
 
     border-radius: 20px;
 
     box-shadow:
         0 20px 60px
         rgba(0,0,0,0.45);
-
-    position: relative;
-
 }}
 
 video {{
-
     display: block;
 
     width: 100%;
@@ -548,71 +597,9 @@ video {{
     border-radius: 14px;
 
     object-fit: contain;
-
-}}
-
-.watch-overlay {{
-
-    position: absolute;
-
-    inset: 10px;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    background:
-        rgba(0,0,0,0.45);
-
-    border-radius: 14px;
-
-    z-index: 10;
-
-}}
-
-.watch-button {{
-
-    border: 0;
-
-    border-radius: 999px;
-
-    padding:
-        15px 28px;
-
-    font-size: 16px;
-
-    font-weight: 800;
-
-    color: white;
-
-    background:
-        linear-gradient(
-            135deg,
-            #8b2cff,
-            #4c00ff
-        );
-
-    box-shadow:
-        0 10px 35px
-        rgba(
-            112,
-            40,
-            255,
-            0.45
-        );
-
-}}
-
-.watch-button:disabled {{
-
-    opacity: 0.6;
-
 }}
 
 .status {{
-
     width: 100%;
 
     max-width: 1000px;
@@ -626,11 +613,36 @@ video {{
     color: #a9a9b5;
 
     font-size: 13px;
+}}
 
+.play-button {{
+    margin-top: 15px;
+
+    padding: 14px 25px;
+
+    border: 0;
+
+    border-radius: 14px;
+
+    color: white;
+
+    font-size: 16px;
+
+    font-weight: 700;
+
+    background:
+        linear-gradient(
+            135deg,
+            #8b2cff,
+            #4c00ff
+        );
+}}
+
+.play-button:active {{
+    transform: scale(0.98);
 }}
 
 .brand {{
-
     margin-top: auto;
 
     padding-top: 35px;
@@ -640,13 +652,16 @@ video {{
     font-size: 12px;
 
     text-align: center;
-
 }}
 
-.error {{
+.info {{
+    margin-top: 10px;
 
-    color: #ff7b7b;
+    color: #777783;
 
+    font-size: 11px;
+
+    text-align: center;
 }}
 
 </style>
@@ -677,29 +692,18 @@ video {{
 
     <div class="player-card">
 
-
         <video
-
             id="videoPlayer"
-
             controls
-
             playsinline
-
             webkit-playsinline
-
             preload="metadata"
-
             controlsList="nodownload"
-
         >
 
             <source
-
                 src="{video_url}"
-
-                type="video/mp4"
-
+                type="{mime_type}"
             >
 
             Your browser does not support
@@ -707,41 +711,32 @@ video {{
 
         </video>
 
-
-        <div
-            id="watchOverlay"
-            class="watch-overlay"
-        >
-
-            <button
-                id="watchButton"
-                class="watch-button"
-            >
-
-                ▶️ Watch Video
-
-            </button>
-
-        </div>
-
-
     </div>
+
+
+    <button
+        id="playButton"
+        class="play-button"
+    >
+        ▶️ Play Video
+    </button>
 
 
     <div
         id="status"
         class="status"
     >
+        ⏳ Preparing video...
+    </div>
 
-        👆 Watch Video dabao
 
+    <div class="info">
+        📡 Telegram MTProto streaming
     </div>
 
 
     <div class="brand">
-
         NIGHT VIDEOS
-
     </div>
 
 
@@ -749,38 +744,6 @@ video {{
 
 
 <script>
-
-
-// ========================================================
-// TELEGRAM WEB APP
-// ========================================================
-
-try {{
-
-    if (
-        window.Telegram &&
-        window.Telegram.WebApp
-    ) {{
-
-        window.Telegram.WebApp.ready();
-
-        window.Telegram.WebApp.expand();
-
-    }}
-
-}} catch (e) {{
-
-    console.log(
-        "Telegram SDK error:",
-        e
-    );
-
-}}
-
-
-// ========================================================
-// VIDEO
-// ========================================================
 
 const video =
     document.getElementById(
@@ -794,21 +757,42 @@ const status =
     );
 
 
-const overlay =
+const playButton =
     document.getElementById(
-        "watchOverlay"
+        "playButton"
     );
 
 
-const watchButton =
-    document.getElementById(
-        "watchButton"
+/* =====================================================
+   TELEGRAM MINI APP
+===================================================== */
+
+try {{
+
+    if (
+        window.Telegram &&
+        window.Telegram.WebApp
+    ) {{
+
+        Telegram.WebApp.ready();
+
+        Telegram.WebApp.expand();
+
+    }}
+
+}} catch (error) {{
+
+    console.log(
+        "Telegram WebApp error:",
+        error
     );
 
+}}
 
-// ========================================================
-// ADSGRAM
-// ========================================================
+
+/* =====================================================
+   ADSGRAM
+===================================================== */
 
 let adController = null;
 
@@ -817,33 +801,21 @@ try {{
 
     if (
         window.Adsgram
+        &&
+        "{ADSGRAM_BLOCK_ID}"
     ) {{
 
         adController =
             window.Adsgram.init({{
-
                 blockId:
-                    "{ADSGRAM_BLOCK_ID}",
-
-                debug: false
-
+                    "{ADSGRAM_BLOCK_ID}"
             }});
-
-        console.log(
-            "AdsGram initialized"
-        );
-
-    }} else {{
-
-        console.error(
-            "AdsGram SDK not loaded"
-        );
 
     }}
 
 }} catch (error) {{
 
-    console.error(
+    console.log(
         "AdsGram init error:",
         error
     );
@@ -851,19 +823,15 @@ try {{
 }}
 
 
-// ========================================================
-// SHOW AD
-// ========================================================
+/* =====================================================
+   SHOW ADSGRAM
+===================================================== */
 
 async function showAd() {{
 
     if (!adController) {{
 
-        console.warn(
-            "AdsGram controller unavailable"
-        );
-
-        return false;
+        return;
 
     }}
 
@@ -871,119 +839,82 @@ async function showAd() {{
     try {{
 
         status.textContent =
-            "📢 Advertisement...";
-
-        watchButton.disabled =
-            true;
+            "📺 Loading advertisement...";
 
 
         await adController.show();
 
 
+    }} catch (error) {{
+
         console.log(
-            "AdsGram ad completed"
-        );
-
-
-        return true;
-
-    }} catch (error) {{
-
-        console.warn(
-            "AdsGram ad error:",
+            "AdsGram error:",
             error
         );
-
-
-        // If no ad is available,
-        // continue with the video.
-
-        return false;
-
-    }} finally {{
-
-        watchButton.disabled =
-            false;
 
     }}
 
 }}
 
 
-// ========================================================
-// START VIDEO
-// ========================================================
+/* =====================================================
+   PLAY BUTTON
+===================================================== */
 
-async function startVideo() {{
-
-    watchButton.disabled =
-        true;
-
-
-    status.textContent =
-        "📢 Loading advertisement...";
-
-
-    // ====================================================
-    // ADSGRAM
-    // ====================================================
-
-    await showAd();
-
-
-    // ====================================================
-    // HIDE OVERLAY
-    // ====================================================
-
-    overlay.style.display =
-        "none";
-
-
-    status.textContent =
-        "⏳ Loading video...";
-
-
-    // ====================================================
-    // PLAY
-    // ====================================================
-
-    try {{
-
-        await video.play();
-
-
-        status.textContent =
-            "▶️ NIGHT VIDEOS";
-
-    }} catch (error) {{
-
-        console.warn(
-            "Autoplay/play error:",
-            error
-        );
-
-
-        status.textContent =
-            "▶️ Press Play to start video";
-
-    }}
-
-}}
-
-
-// ========================================================
-// BUTTON
-// ========================================================
-
-watchButton.addEventListener(
+playButton.addEventListener(
     "click",
-    startVideo
+    async function() {{
+
+        playButton.disabled = true;
+
+        playButton.textContent =
+            "⏳ Please wait...";
+
+
+        await showAd();
+
+
+        status.textContent =
+            "▶️ Starting video...";
+
+
+        try {{
+
+            await video.play();
+
+
+            playButton.style.display =
+                "none";
+
+
+        }} catch (error) {{
+
+            console.log(
+                "Play error:",
+                error
+            );
+
+
+            status.textContent =
+                "▶️ Tap video to play";
+
+
+            playButton.disabled =
+                false;
+
+
+            playButton.textContent =
+                "▶️ Play Video";
+
+        }}
+
+    }}
 );
 
 
-// ========================================================
-// VIDEO EVENTS
-// ========================================================
+/* =====================================================
+   VIDEO EVENTS
+===================================================== */
 
 video.addEventListener(
     "loadstart",
@@ -1001,7 +932,18 @@ video.addEventListener(
     function() {{
 
         status.textContent =
-            "👆 Watch Video dabao";
+            "✅ Video ready";
+
+    }}
+);
+
+
+video.addEventListener(
+    "canplay",
+    function() {{
+
+        status.textContent =
+            "▶️ Ready to play";
 
     }}
 );
@@ -1030,18 +972,22 @@ video.addEventListener(
 
 
 video.addEventListener(
-    "canplay",
+    "pause",
     function() {{
 
-        if (
-            overlay.style.display
-            !== "none"
-        ) {{
+        status.textContent =
+            "⏸️ Paused";
 
-            status.textContent =
-                "👆 Watch Video dabao";
+    }}
+);
 
-        }}
+
+video.addEventListener(
+    "ended",
+    function() {{
+
+        status.textContent =
+            "✅ Video finished";
 
     }}
 );
@@ -1051,16 +997,17 @@ video.addEventListener(
     "error",
     function() {{
 
+        console.log(
+            "Video error:",
+            video.error
+        );
+
+
         status.textContent =
             "❌ Video could not be played";
 
-        status.classList.add(
-            "error"
-        );
-
     }}
 );
-
 
 </script>
 
@@ -1068,264 +1015,462 @@ video.addEventListener(
 </body>
 
 </html>
-
 """
 
 
     return web.Response(
-
         text=html,
-
         content_type="text/html"
-
     )
 
 
 # =========================================================
+# PARSE RANGE HEADER
+# =========================================================
+
+def parse_range(
+    range_header: str,
+    file_size: int
+):
+
+    if not range_header:
+
+        return None
+
+
+    if not range_header.startswith(
+        "bytes="
+    ):
+
+        return None
+
+
+    value = (
+        range_header
+        .replace(
+            "bytes=",
+            "",
+            1
+        )
+        .strip()
+    )
+
+
+    if "," in value:
+
+        value = value.split(
+            ",",
+            1
+        )[0]
+
+
+    parts = value.split(
+        "-",
+        1
+    )
+
+
+    if len(parts) != 2:
+
+        return None
+
+
+    start_text = parts[0].strip()
+    end_text = parts[1].strip()
+
+
+    try:
+
+        if start_text == "":
+
+            suffix_length = int(
+                end_text
+            )
+
+
+            if suffix_length <= 0:
+
+                return None
+
+
+            if suffix_length > file_size:
+
+                suffix_length = file_size
+
+
+            start = (
+                file_size
+                - suffix_length
+            )
+
+            end = (
+                file_size - 1
+            )
+
+        else:
+
+            start = int(
+                start_text
+            )
+
+
+            if start < 0:
+
+                return None
+
+
+            if start >= file_size:
+
+                return None
+
+
+            if end_text == "":
+
+                end = (
+                    file_size - 1
+                )
+
+            else:
+
+                end = int(
+                    end_text
+                )
+
+
+                if end >= file_size:
+
+                    end = (
+                        file_size - 1
+                    )
+
+
+            if end < start:
+
+                return None
+
+
+        return start, end
+
+
+    except ValueError:
+
+        return None
+
+
+# =========================================================
 # VIDEO STREAM
+#
+# IMPORTANT:
+# This uses Pyrogram MTProto instead of
+# Telegram Bot API getFile().
+#
+# This is what removes the 20MB Bot API
+# download bottleneck.
 # =========================================================
 
 async def stream_video(
     request: web.Request
 ):
 
-    global http_session
-
-
-    file_id = request.query.get(
-        "file_id"
+    file_id = (
+        request.query.get(
+            "file_id"
+        )
     )
 
 
     if not file_id:
 
         return web.Response(
-
             text="Missing file_id",
-
             status=400
-
         )
-
-
-    # =====================================================
-    # SESSION
-    # =====================================================
-
-    if (
-
-        http_session is None
-        or http_session.closed
-
-    ):
-
-        http_session = (
-            aiohttp.ClientSession()
-        )
-
-
-    # =====================================================
-    # TELEGRAM getFile
-    # =====================================================
-
-    api_url = (
-
-        "https://api.telegram.org/"
-        f"bot{BOT_TOKEN}/getFile"
-
-    )
 
 
     try:
 
-        async with http_session.get(
-
-            api_url,
-
-            params={{
-                "file_id": file_id
-            }},
-
-            timeout=aiohttp.ClientTimeout(
-                total=30
-            ),
-
-        ) as response:
-
-
-            data = (
-                await response.json()
+        file_size = int(
+            request.query.get(
+                "size",
+                "0"
             )
-
-
-    except Exception as error:
-
-        print(
-            "Telegram getFile error:",
-            error
         )
 
+    except ValueError:
+
+        file_size = 0
+
+
+    if file_size <= 0:
 
         return web.Response(
-
-            text=(
-                "Could not contact Telegram"
-            ),
-
-            status=502
-
+            text="Invalid file size",
+            status=400
         )
 
 
-    # =====================================================
-    # CHECK
-    # =====================================================
-
-    if (
-
-        not data.get("ok")
-        or not data.get(
-            "result",
-            {}
-        ).get("file_path")
-
-    ):
-
-        return web.Response(
-
-            text=(
-                "Telegram could not "
-                "download this file."
-            ),
-
-            status=404
-
+    mime_type = (
+        request.query.get(
+            "mime",
+            "video/mp4"
         )
+    )
 
 
-    file_path = (
-        data["result"]["file_path"]
+    file_name = (
+        request.query.get(
+            "name",
+            "video.mp4"
+        )
     )
 
 
     # =====================================================
-    # TELEGRAM FILE URL
+    # RANGE
     # =====================================================
 
-    telegram_file_url = (
+    range_header = (
+        request.headers.get(
+            "Range"
+        )
+    )
 
-        "https://api.telegram.org/"
-        f"file/bot{BOT_TOKEN}/"
-        f"{file_path}"
 
+    requested_range = parse_range(
+        range_header,
+        file_size
     )
 
 
     # =====================================================
-    # STREAM
+    # HEAD REQUEST
+    # =====================================================
+
+    if request.method == "HEAD":
+
+        headers = {
+
+            "Content-Type":
+                mime_type,
+
+            "Content-Length":
+                str(file_size),
+
+            "Accept-Ranges":
+                "bytes",
+
+            "Content-Disposition":
+                (
+                    f'inline; filename="{file_name}"'
+                ),
+
+            "Cache-Control":
+                "no-cache",
+
+        }
+
+
+        return web.Response(
+            status=200,
+            headers=headers
+        )
+
+
+    # =====================================================
+    # DETERMINE RANGE
+    # =====================================================
+
+    if requested_range:
+
+        start_byte, end_byte = (
+            requested_range
+        )
+
+        content_length = (
+            end_byte
+            - start_byte
+            + 1
+        )
+
+        status_code = 206
+
+    else:
+
+        start_byte = 0
+
+        end_byte = (
+            file_size - 1
+        )
+
+        content_length = file_size
+
+        status_code = 200
+
+
+    # =====================================================
+    # RESPONSE HEADERS
+    # =====================================================
+
+    headers = {
+
+        "Content-Type":
+            mime_type,
+
+        "Content-Length":
+            str(content_length),
+
+        "Accept-Ranges":
+            "bytes",
+
+        "Content-Disposition":
+            (
+                f'inline; filename="{file_name}"'
+            ),
+
+        "Cache-Control":
+            "no-cache",
+
+        "X-Content-Type-Options":
+            "nosniff",
+
+    }
+
+
+    if status_code == 206:
+
+        headers["Content-Range"] = (
+            f"bytes {start_byte}-"
+            f"{end_byte}/"
+            f"{file_size}"
+        )
+
+
+    response = web.StreamResponse(
+        status=status_code,
+        headers=headers
+    )
+
+
+    await response.prepare(
+        request
+    )
+
+
+    # =====================================================
+    # CALCULATE PYROGRAM CHUNK OFFSET
+    # =====================================================
+
+    first_chunk = (
+        start_byte
+        // CHUNK_SIZE
+    )
+
+
+    inner_offset = (
+        start_byte
+        % CHUNK_SIZE
+    )
+
+
+    bytes_remaining = (
+        content_length
+    )
+
+
+    chunks_needed = (
+        (
+            inner_offset
+            + content_length
+            + CHUNK_SIZE
+            - 1
+        )
+        // CHUNK_SIZE
+    )
+
+
+    # =====================================================
+    # STREAM FROM TELEGRAM
     # =====================================================
 
     try:
 
-        async with http_session.get(
-
-            telegram_file_url,
-
-            timeout=aiohttp.ClientTimeout(
-                total=None
-            ),
-
-        ) as upstream:
+        chunk_number = 0
 
 
-            if upstream.status != 200:
+        async for chunk in (
+            mtproto.stream_media(
+                file_id,
+                offset=first_chunk,
+                limit=chunks_needed,
+            )
+        ):
 
-                return web.Response(
+            if bytes_remaining <= 0:
 
-                    text=(
-                        "Could not download "
-                        "video from Telegram."
-                    ),
+                break
 
-                    status=502
 
+            # ---------------------------------------------
+            # Remove bytes before requested range
+            # ---------------------------------------------
+
+            if chunk_number == 0:
+
+                if inner_offset:
+
+                    chunk = (
+                        chunk[
+                            inner_offset:
+                        ]
+                    )
+
+
+            # ---------------------------------------------
+            # Don't send more than requested
+            # ---------------------------------------------
+
+            if len(chunk) > bytes_remaining:
+
+                chunk = (
+                    chunk[
+                        :bytes_remaining
+                    ]
                 )
 
 
-            content_type = (
+            if not chunk:
 
-                upstream.headers.get(
-                    "Content-Type",
-                    "video/mp4"
-                )
+                break
 
+
+            await response.write(
+                chunk
             )
 
 
-            content_length = (
-
-                upstream.headers.get(
-                    "Content-Length"
-                )
-
+            bytes_remaining -= (
+                len(chunk)
             )
 
 
-            headers = {{
-
-                "Content-Type":
-                    content_type,
-
-                "Cache-Control":
-                    "no-store",
-
-                "Accept-Ranges":
-                    "none",
-
-            }}
+            chunk_number += 1
 
 
-            if content_length:
+            if bytes_remaining <= 0:
 
-                headers[
-                    "Content-Length"
-                ] = content_length
+                break
 
 
-            response = (
-                web.StreamResponse(
-                    status=200,
-                    headers=headers
-                )
-            )
+        await response.write_eof()
 
 
-            await response.prepare(
-                request
-            )
-
-
-            async for chunk in (
-
-                upstream.content
-                .iter_chunked(
-                    1024 * 256
-                )
-
-            ):
-
-                await response.write(
-                    chunk
-                )
-
-
-            await response.write_eof()
-
-
-            return response
+        return response
 
 
     except asyncio.CancelledError:
+
+        # Browser closed video connection.
+        # This is normal when seeking/stopping.
 
         raise
 
@@ -1333,20 +1478,32 @@ async def stream_video(
     except Exception as error:
 
         print(
-            "Streaming error:",
-            error
+            "================================"
+        )
+
+        print(
+            "MTProto streaming error:"
+        )
+
+        print(
+            repr(error)
+        )
+
+        print(
+            "================================"
         )
 
 
-        return web.Response(
+        try:
 
-            text=(
-                "Video streaming failed"
-            ),
+            await response.write_eof()
 
-            status=502
+        except Exception:
 
-        )
+            pass
+
+
+        return response
 
 
 # =========================================================
@@ -1355,28 +1512,42 @@ async def stream_video(
 
 async def start_web_server():
 
-    app = web.Application()
+    app = web.Application(
+        client_max_size=1024 * 1024 * 1024 * 10
+    )
 
 
+    # HOME
     app.router.add_get(
         "/",
         health
     )
 
 
+    # HEALTH
     app.router.add_get(
         "/health",
         health
     )
 
 
+    # MINI APP
     app.router.add_get(
         "/watch",
         player
     )
 
 
-    app.router.add_get(
+    # VIDEO STREAM
+    app.router.add_route(
+        "GET",
+        "/stream",
+        stream_video
+    )
+
+
+    app.router.add_route(
+        "HEAD",
         "/stream",
         stream_video
     )
@@ -1391,13 +1562,9 @@ async def start_web_server():
 
 
     site = web.TCPSite(
-
         runner,
-
         "0.0.0.0",
-
         PORT
-
     )
 
 
@@ -1405,7 +1572,7 @@ async def start_web_server():
 
 
     print(
-        "================================"
+        "======================================"
     )
 
     print(
@@ -1421,11 +1588,19 @@ async def start_web_server():
     )
 
     print(
-        f"ADSGRAM: {ADSGRAM_BLOCK_ID}"
+        "MTProto: ENABLED"
     )
 
     print(
-        "================================"
+        "Large video streaming: ENABLED"
+    )
+
+    print(
+        f"AdsGram Block: {ADSGRAM_BLOCK_ID}"
+    )
+
+    print(
+        "======================================" 
     )
 
 
@@ -1435,11 +1610,36 @@ async def start_web_server():
 
 async def main():
 
-    await start_web_server()
+    # -----------------------------------------------------
+    # Start MTProto
+    # -----------------------------------------------------
+
+    print(
+        "Starting Telegram MTProto client..."
+    )
+
+
+    await mtproto.start()
 
 
     print(
-        "NIGHT VIDEOS BOT STARTING..."
+        "Telegram MTProto client started ✅"
+    )
+
+
+    # -----------------------------------------------------
+    # Start Web Server
+    # -----------------------------------------------------
+
+    await start_web_server()
+
+
+    # -----------------------------------------------------
+    # Start Aiogram Bot
+    # -----------------------------------------------------
+
+    print(
+        "Starting NIGHT VIDEOS bot..."
     )
 
 
@@ -1451,15 +1651,27 @@ async def main():
 
     finally:
 
-        if (
-            http_session
-            and not http_session.closed
-        ):
-
-            await http_session.close()
+        print(
+            "Stopping bot..."
+        )
 
 
-        await bot.session.close()
+        try:
+
+            await bot.session.close()
+
+        except Exception:
+
+            pass
+
+
+        try:
+
+            await mtproto.stop()
+
+        except Exception:
+
+            pass
 
 
 # =========================================================
@@ -1477,5 +1689,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
 
         print(
-            "Bot stopped."
+            "NIGHT VIDEOS stopped."
         )
