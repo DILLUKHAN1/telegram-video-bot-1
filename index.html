@@ -1,165 +1,112 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html>
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport"
-content="width=device-width, initial-scale=1.0">
-
-<meta name="theme-color" content="#050507">
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
 <title>NIGHT VIDEOS</title>
 
-<style>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 
+<style>
 * {
     box-sizing: border-box;
 }
 
-html,
 body {
     margin: 0;
-    padding: 0;
-    width: 100%;
-    min-height: 100%;
-    background: #050507;
-    color: #ffffff;
+    background: #08090d;
+    color: white;
     font-family: Arial, sans-serif;
 }
 
-body {
-    display: flex;
-    justify-content: center;
-}
-
 .app {
-    width: 100%;
-    max-width: 1000px;
     min-height: 100vh;
-    background: #050507;
+    padding: 18px;
 }
-
-/* HEADER */
 
 .header {
-    height: 64px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-bottom: 1px solid #202024;
-    background: #09090d;
+    text-align: center;
+    padding: 15px 0 25px;
 }
 
 .logo {
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: 1px;
-}
-
-/* PLAYER */
-
-.player-area {
-    width: 100%;
-    padding: 16px;
-}
-
-.video-box {
-    position: relative;
-    width: 100%;
-    background: #000000;
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: 0 10px 35px rgba(0,0,0,0.45);
-}
-
-video {
-    display: block;
-    width: 100%;
-    height: auto;
-    max-height: 72vh;
-    background: #000000;
-}
-
-/* LOADING */
-
-.loading {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,0.75);
-    font-size: 16px;
-    z-index: 5;
-}
-
-.loading.hidden {
-    display: none;
-}
-
-/* INFO */
-
-.info {
-    padding: 18px 4px;
+    font-size: 42px;
+    margin-bottom: 5px;
 }
 
 .title {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 27px;
+    font-weight: 800;
 }
 
 .subtitle {
-    margin-top: 6px;
-    color: #8f8f98;
+    color: #999;
+    margin-top: 5px;
     font-size: 14px;
 }
 
-/* BUTTONS */
-
-.buttons {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
-    flex-wrap: wrap;
+.player-box {
+    width: 100%;
+    background: #000;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
 }
 
-.btn {
-    border: 1px solid #2a2a30;
-    background: #111116;
-    color: white;
-    padding: 11px 16px;
-    border-radius: 10px;
+video {
+    width: 100%;
+    display: block;
+    background: #000;
+    max-height: 70vh;
+}
+
+.status {
+    text-align: center;
+    color: #aaa;
     font-size: 14px;
-    cursor: pointer;
-}
-
-.btn:active {
-    transform: scale(0.97);
-}
-
-/* ERROR */
-
-.error {
-    display: none;
-    margin-top: 15px;
     padding: 14px;
-    border-radius: 10px;
-    background: #241014;
-    color: #ffb4b4;
+}
+
+.info {
+    margin-top: 18px;
+    background: #15161d;
+    border-radius: 16px;
+    padding: 18px;
+}
+
+.info-title {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.info-text {
+    color: #aaa;
     font-size: 14px;
+    line-height: 1.5;
+}
+
+button {
+    width: 100%;
+    border: 0;
+    border-radius: 14px;
+    padding: 16px;
+    margin-top: 18px;
+    font-size: 17px;
+    font-weight: bold;
+    color: white;
+    background: #6d28d9;
 }
 
 .footer {
-    padding: 25px;
     text-align: center;
-    color: #66666f;
+    color: #666;
     font-size: 12px;
+    padding: 25px 0;
 }
-
 </style>
-
 </head>
 
 <body>
@@ -167,65 +114,43 @@ video {
 <div class="app">
 
     <div class="header">
-        <div class="logo">
-            🌙 NIGHT VIDEOS
-        </div>
+        <div class="logo">🎬</div>
+        <div class="title">NIGHT VIDEOS</div>
+        <div class="subtitle">Video Player Mini App</div>
     </div>
 
-    <div class="player-area">
+    <div class="player-box">
 
-        <div class="video-box">
+        <video
+            id="video"
+            controls
+            playsinline
+            webkit-playsinline
+            preload="metadata">
+        </video>
 
-            <div id="loading"
-                 class="loading">
-                Loading video...
-            </div>
-
-            <video
-                id="videoPlayer"
-                controls
-                playsinline
-                webkit-playsinline
-                preload="metadata">
-
-            </video>
-
-        </div>
-
-        <div class="info">
-
-            <div class="title">
-                🎬 NIGHT VIDEOS
-            </div>
-
-            <div class="subtitle">
-                ▶️ Play Online
-            </div>
-
-            <div class="buttons">
-
-                <button
-                    class="btn"
-                    onclick="playVideo()">
-                    ▶️ Play
-                </button>
-
-                <button
-                    class="btn"
-                    onclick="toggleFullscreen()">
-                    ⛶ Fullscreen
-                </button>
-
-            </div>
-
-            <div id="error"
-                 class="error">
-                ❌ Video load नहीं हो सका।
-            </div>
-
+        <div class="status" id="status">
+            Loading video...
         </div>
 
     </div>
+
+    <div class="info">
+
+        <div class="info-title">
+            🎬 NIGHT VIDEOS
+        </div>
+
+        <div class="info-text">
+            Enjoy your video online with the NIGHT VIDEOS
+            Mini App.
+        </div>
+
+    </div>
+
+    <button onclick="fullscreenVideo()">
+        ⛶ Fullscreen
+    </button>
 
     <div class="footer">
         NIGHT VIDEOS • Play Online
@@ -233,149 +158,62 @@ video {
 
 </div>
 
-
 <script>
 
-const player =
-    document.getElementById("videoPlayer");
+const tg = window.Telegram.WebApp;
 
-const loading =
-    document.getElementById("loading");
+tg.ready();
+tg.expand();
 
-const errorBox =
-    document.getElementById("error");
+const params = new URLSearchParams(
+    window.location.search
+);
 
-const params =
-    new URLSearchParams(
-        window.location.search
-    );
+const fileId = params.get("file_id");
 
-const fileId =
-    params.get("file_id");
+const video = document.getElementById("video");
+const status = document.getElementById("status");
 
+if (!fileId) {
 
-/*
-    IMPORTANT:
-    Telegram Play Online URL already
-    contains file_id.
-
-    We create the stream URL using
-    the same Railway domain.
-*/
-
-if (fileId) {
-
-    const streamUrl =
-        window.location.origin +
-        "/stream?file_id=" +
-        encodeURIComponent(fileId);
-
-    player.src = streamUrl;
-
-    player.load();
+    status.textContent =
+        "❌ Video file not found.";
 
 } else {
 
-    loading.classList.add("hidden");
+    const streamUrl =
+        "/stream?file_id=" +
+        encodeURIComponent(fileId);
 
-    errorBox.style.display = "block";
+    video.src = streamUrl;
 
-    errorBox.textContent =
-        "❌ Video file ID नहीं मिला।";
-}
+    video.load();
 
+    video.addEventListener("loadedmetadata", () => {
 
-/* VIDEO EVENTS */
+        status.textContent =
+            "▶️ Ready to play";
 
-player.addEventListener(
-    "loadedmetadata",
-    function() {
+    });
 
-        loading.classList.add("hidden");
+    video.addEventListener("error", () => {
 
-    }
-);
+        status.textContent =
+            "❌ Video could not be loaded.";
 
-
-player.addEventListener(
-    "canplay",
-    function() {
-
-        loading.classList.add("hidden");
-
-    }
-);
-
-
-player.addEventListener(
-    "waiting",
-    function() {
-
-        loading.classList.remove("hidden");
-
-    }
-);
-
-
-player.addEventListener(
-    "playing",
-    function() {
-
-        loading.classList.add("hidden");
-
-    }
-);
-
-
-player.addEventListener(
-    "error",
-    function() {
-
-        loading.classList.add("hidden");
-
-        errorBox.style.display = "block";
-
-        errorBox.textContent =
-            "❌ Video load नहीं हो सका।";
-    }
-);
-
-
-/* PLAY */
-
-function playVideo() {
-
-    player.play().catch(
-        function() {}
-    );
+    });
 
 }
 
+function fullscreenVideo() {
 
-/* FULLSCREEN */
+    if (video.requestFullscreen) {
 
-function toggleFullscreen() {
+        video.requestFullscreen();
 
-    if (
-        document.fullscreenElement
-    ) {
+    } else if (video.webkitEnterFullscreen) {
 
-        document.exitFullscreen();
-
-        return;
-    }
-
-    if (
-        player.requestFullscreen
-    ) {
-
-        player.requestFullscreen();
-
-    } else if (
-        player.webkitEnterFullscreen
-    ) {
-
-        player.webkitEnterFullscreen();
+        video.webkitEnterFullscreen();
 
     }
 
@@ -384,5 +222,4 @@ function toggleFullscreen() {
 </script>
 
 </body>
-
 </html>
