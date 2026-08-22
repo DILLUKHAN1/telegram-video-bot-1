@@ -2,18 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-
     <meta
         name="viewport"
-        content="width=device-width,
-        initial-scale=1.0,
-        maximum-scale=1.0,
-        user-scalable=no"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     >
 
-    <title>NIGHT VIDEOS - Mini App</title>
+    <title>NIGHT VIDEOS</title>
 
-    <!-- Telegram Mini App SDK -->
+    <!-- Telegram Mini App -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <!-- AdsGram SDK -->
@@ -25,226 +21,147 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        html,
         body {
             margin: 0;
             padding: 0;
-            width: 100%;
-            min-height: 100%;
-            background: #0b0b12;
+            background: #090909;
             color: #ffffff;
             font-family: Arial, Helvetica, sans-serif;
-        }
-
-        body {
-            overflow-x: hidden;
-        }
-
-        .app {
-            width: 100%;
             min-height: 100vh;
-            background:
-                radial-gradient(
-                    circle at top,
-                    #252044 0%,
-                    #11101b 35%,
-                    #08080d 100%
-                );
         }
-
-        /* HEADER */
-
-        .header {
-            width: 100%;
-            padding: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: rgba(10, 10, 17, 0.92);
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            position: sticky;
-            top: 0;
-            z-index: 20;
-            backdrop-filter: blur(12px);
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 19px;
-            font-weight: 800;
-        }
-
-        .logo-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(
-                135deg,
-                #8b2cff,
-                #ff176f
-            );
-            font-size: 20px;
-        }
-
-        .status {
-            font-size: 12px;
-            color: #8df5a6;
-            background: rgba(60, 220, 100, 0.12);
-            border: 1px solid rgba(60, 220, 100, 0.25);
-            padding: 7px 10px;
-            border-radius: 20px;
-        }
-
-        /* MAIN */
 
         .container {
             width: 100%;
             max-width: 700px;
-            margin: 0 auto;
-            padding: 18px;
+            margin: auto;
+            padding: 20px 15px 40px;
         }
 
-        .title {
-            margin-top: 8px;
-            margin-bottom: 5px;
-            font-size: 26px;
+        .header {
+            text-align: center;
+            padding: 20px 10px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 30px;
             font-weight: 800;
+            letter-spacing: 1px;
         }
 
-        .subtitle {
-            color: #a9a8b4;
+        .header p {
+            margin: 8px 0 0;
+            color: #aaa;
             font-size: 14px;
-            margin-bottom: 18px;
         }
 
-        /* VIDEO */
-
-        .video-card {
-            width: 100%;
-            background: #101018;
+        .card {
+            background: #151515;
+            border: 1px solid #282828;
             border-radius: 18px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 15px 50px rgba(0,0,0,0.35);
+            padding: 18px;
+            margin-top: 15px;
         }
 
-        .video-wrapper {
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ddd;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        input {
             width: 100%;
-            aspect-ratio: 16 / 9;
+            height: 52px;
+            border: 1px solid #333;
+            border-radius: 12px;
+            background: #0e0e0e;
+            color: white;
+            padding: 0 14px;
+            outline: none;
+            font-size: 15px;
+        }
+
+        input:focus {
+            border-color: #777;
+        }
+
+        button {
+            width: 100%;
+            height: 52px;
+            border: 0;
+            border-radius: 12px;
+            margin-top: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .play-btn {
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .play-btn:active {
+            transform: scale(0.98);
+        }
+
+        .demo-btn {
+            background: #222;
+            color: #fff;
+            border: 1px solid #333;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #101010;
+            color: #aaa;
+            font-size: 13px;
+            line-height: 1.5;
+            display: none;
+        }
+
+        .video-box {
+            margin-top: 18px;
             background: #000;
-            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            display: none;
         }
 
         video {
             width: 100%;
-            height: 100%;
             display: block;
             background: #000;
-            object-fit: contain;
+            max-height: 70vh;
         }
-
-        .video-placeholder {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 12px;
-            color: #aaa;
-            text-align: center;
-            padding: 20px;
-            pointer-events: none;
-        }
-
-        .play-circle {
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(
-                135deg,
-                #8b2cff,
-                #ff176f
-            );
-            font-size: 30px;
-            padding-left: 4px;
-        }
-
-        /* INFO */
 
         .info {
-            padding: 16px;
-        }
-
-        .video-title {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 7px;
-        }
-
-        .video-description {
-            font-size: 13px;
-            color: #9d9ca8;
-            line-height: 1.5;
-        }
-
-        /* BUTTON */
-
-        .play-button {
-            width: 100%;
             margin-top: 15px;
-            border: 0;
-            border-radius: 14px;
-            padding: 16px;
-            color: white;
-            font-size: 16px;
-            font-weight: 800;
-            background: linear-gradient(
-                135deg,
-                #8b2cff,
-                #ff176f
-            );
-            cursor: pointer;
-            box-shadow:
-                0 10px 30px rgba(139,44,255,0.25);
+            color: #888;
+            font-size: 12px;
+            line-height: 1.6;
+            text-align: center;
         }
-
-        .play-button:active {
-            transform: scale(0.98);
-        }
-
-        .play-button:disabled {
-            opacity: 0.55;
-            cursor: not-allowed;
-        }
-
-        /* LOADING */
 
         .loading {
             display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 14px;
-            color: #bdbbc8;
-            font-size: 13px;
+            text-align: center;
+            padding: 15px;
+            color: #aaa;
         }
 
         .spinner {
-            width: 18px;
-            height: 18px;
-            border: 2px solid rgba(255,255,255,0.2);
-            border-top-color: #ffffff;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #333;
+            border-top-color: #fff;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
+            margin: 0 auto 10px;
         }
 
         @keyframes spin {
@@ -253,258 +170,130 @@
             }
         }
 
-        /* MESSAGE */
-
-        .message {
-            display: none;
-            margin-top: 14px;
-            padding: 13px;
-            border-radius: 12px;
-            font-size: 13px;
-            line-height: 1.5;
-            background: rgba(255,255,255,0.05);
-            color: #d6d5dd;
-            border: 1px solid rgba(255,255,255,0.08);
-        }
-
-        .message.error {
-            color: #ff9c9c;
-            background: rgba(255,70,70,0.08);
-            border-color: rgba(255,70,70,0.18);
-        }
-
-        .message.success {
-            color: #9cffb0;
-            background: rgba(60,220,100,0.08);
-            border-color: rgba(60,220,100,0.18);
-        }
-
-        /* FOOTER */
-
         .footer {
             text-align: center;
-            padding: 35px 15px 25px;
-            color: #6f6e79;
-            font-size: 12px;
-        }
-
-        /* MOBILE */
-
-        @media (max-width: 480px) {
-
-            .container {
-                padding: 14px;
-            }
-
-            .title {
-                font-size: 23px;
-            }
-
-            .video-card {
-                border-radius: 15px;
-            }
-
-            .play-circle {
-                width: 60px;
-                height: 60px;
-                font-size: 25px;
-            }
+            color: #555;
+            font-size: 11px;
+            margin-top: 25px;
         }
     </style>
 </head>
 
 <body>
 
-<div class="app">
+<div class="container">
 
-    <!-- HEADER -->
-    <header class="header">
+    <div class="header">
+        <h1>🎬 NIGHT VIDEOS</h1>
+        <p>Mini App Video Player</p>
+    </div>
 
-        <div class="logo">
-            <div class="logo-icon">▶</div>
-            <span>NIGHT VIDEOS</span>
+    <div class="card">
+
+        <label for="videoUrl">
+            Video URL
+        </label>
+
+        <input
+            id="videoUrl"
+            type="url"
+            placeholder="Paste direct video URL..."
+            autocomplete="off"
+        >
+
+        <button
+            id="playButton"
+            class="play-btn"
+            type="button"
+        >
+            ▶ PLAY VIDEO
+        </button>
+
+        <button
+            id="demoButton"
+            class="demo-btn"
+            type="button"
+        >
+            TEST ADS
+        </button>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            Preparing video...
         </div>
 
-        <div class="status">
-            ● ONLINE
+        <div id="status" class="status"></div>
+
+        <div id="videoBox" class="video-box">
+            <video
+                id="videoPlayer"
+                controls
+                playsinline
+                preload="metadata"
+            >
+                Your browser does not support HTML5 video.
+            </video>
         </div>
 
-    </header>
+    </div>
 
+    <div class="info">
+        Advertisement may appear before video playback.
+        <br>
+        If no ad is available, the video will continue normally.
+    </div>
 
-    <!-- MAIN -->
-    <main class="container">
-
-        <div class="title">
-            Video Player
-        </div>
-
-        <div class="subtitle">
-            Watch your video online
-        </div>
-
-
-        <!-- VIDEO CARD -->
-        <section class="video-card">
-
-            <div class="video-wrapper">
-
-                <video
-                    id="videoPlayer"
-                    playsinline
-                    controls
-                    preload="metadata"
-                >
-                    Your browser does not support video playback.
-                </video>
-
-
-                <div
-                    id="placeholder"
-                    class="video-placeholder"
-                >
-
-                    <div class="play-circle">
-                        ▶
-                    </div>
-
-                    <div>
-                        Press Play to start
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <div class="info">
-
-                <div
-                    id="videoTitle"
-                    class="video-title"
-                >
-                    NIGHT VIDEOS
-                </div>
-
-                <div class="video-description">
-                    Watch the video after the advertisement.
-                </div>
-
-
-                <!-- PLAY BUTTON -->
-                <button
-                    id="playButton"
-                    class="play-button"
-                >
-                    ▶ WATCH VIDEO
-                </button>
-
-
-                <!-- LOADING -->
-                <div
-                    id="loading"
-                    class="loading"
-                >
-
-                    <div class="spinner"></div>
-
-                    <span id="loadingText">
-                        Loading advertisement...
-                    </span>
-
-                </div>
-
-
-                <!-- MESSAGE -->
-                <div
-                    id="message"
-                    class="message"
-                ></div>
-
-            </div>
-
-        </section>
-
-
-        <div class="footer">
-            NIGHT VIDEOS • Telegram Mini App
-        </div>
-
-    </main>
+    <div class="footer">
+        NIGHT VIDEOS • Mini App
+    </div>
 
 </div>
 
 
 <script>
 
-    /* =========================================================
+    /* =========================================
        TELEGRAM MINI APP
-    ========================================================= */
+    ========================================= */
 
     const tg = window.Telegram?.WebApp;
 
     if (tg) {
-
         tg.ready();
-
         tg.expand();
 
         try {
-            tg.setHeaderColor("#0b0b12");
-            tg.setBackgroundColor("#0b0b12");
+            tg.setHeaderColor("#090909");
+            tg.setBackgroundColor("#090909");
         } catch (e) {
-            console.log("Telegram theme settings unavailable");
+            console.log("Telegram theme setup skipped");
         }
     }
 
 
-    /* =========================================================
-       ADSGRAM SETTINGS
-    ========================================================= */
+    /* =========================================
+       ADSGRAM CONFIGURATION
+    ========================================= */
 
-    /*
-       AdsGram Interstitial Block ID
+    const ADSGRAM_BLOCK_ID = "int-44048";
 
-       IMPORTANT:
-       This must be your REAL AdsGram Interstitial Block ID.
-
-       Example:
-       int-12345
-    */
-
-    const ADSGRAM_BLOCK_ID = "int-44036";
+    let adController = null;
 
 
-    let AdController = null;
-
-
-    /* =========================================================
-       INITIALIZE ADSGRAM
-    ========================================================= */
-
-    function initializeAdsGram() {
+    function initializeAds() {
 
         try {
 
             if (!window.Adsgram) {
-
-                console.error(
-                    "AdsGram SDK was not loaded."
-                );
-
+                console.warn("AdsGram SDK is not loaded.");
                 return false;
             }
 
+            adController = window.Adsgram.init({
+                blockId: ADSGRAM_BLOCK_ID
+            });
 
-            AdController =
-                window.Adsgram.init({
-                    blockId: ADSGRAM_BLOCK_ID
-                });
-
-
-            console.log(
-                "AdsGram initialized successfully."
-            );
+            console.log("AdsGram initialized:", ADSGRAM_BLOCK_ID);
 
             return true;
 
@@ -515,318 +304,228 @@
                 error
             );
 
+            adController = null;
+
             return false;
         }
     }
 
 
-    /* =========================================================
-       ELEMENTS
-    ========================================================= */
+    /* Initialize once */
+    initializeAds();
 
-    const video =
-        document.getElementById("videoPlayer");
+
+    /* =========================================
+       UI ELEMENTS
+    ========================================= */
 
     const playButton =
         document.getElementById("playButton");
 
-    const placeholder =
-        document.getElementById("placeholder");
+    const demoButton =
+        document.getElementById("demoButton");
 
-    const loading =
+    const videoUrl =
+        document.getElementById("videoUrl");
+
+    const videoPlayer =
+        document.getElementById("videoPlayer");
+
+    const videoBox =
+        document.getElementById("videoBox");
+
+    const statusBox =
+        document.getElementById("status");
+
+    const loadingBox =
         document.getElementById("loading");
 
-    const loadingText =
-        document.getElementById("loadingText");
 
-    const message =
-        document.getElementById("message");
+    /* =========================================
+       STATUS FUNCTION
+    ========================================= */
 
+    function showStatus(message) {
 
-    /* =========================================================
-       MESSAGE
-    ========================================================= */
+        statusBox.style.display = "block";
+        statusBox.textContent = message;
 
-    function showMessage(
-        text,
-        type = ""
-    ) {
-
-        message.textContent = text;
-
-        message.className =
-            "message " + type;
-
-        message.style.display =
-            "block";
     }
 
 
-    function hideMessage() {
+    function hideStatus() {
 
-        message.style.display =
-            "none";
+        statusBox.style.display = "none";
+
     }
 
 
-    /* =========================================================
+    /* =========================================
        LOADING
-    ========================================================= */
+    ========================================= */
 
-    function showLoading(
-        text
-    ) {
+    function showLoading() {
 
-        loadingText.textContent =
-            text;
+        loadingBox.style.display = "block";
 
-        loading.style.display =
-            "flex";
     }
 
 
     function hideLoading() {
 
-        loading.style.display =
-            "none";
+        loadingBox.style.display = "none";
+
     }
 
 
-    /* =========================================================
-       VIDEO URL
-    ========================================================= */
+    /* =========================================
+       PLAY VIDEO
+    ========================================= */
 
-    function getVideoUrl() {
+    async function startVideo() {
 
-        /*
-          You can open Mini App like:
+        const url = videoUrl.value.trim();
 
-          https://your-domain.com/?video=https://example.com/video.mp4
-        */
+        if (!url) {
 
-        const params =
-            new URLSearchParams(
-                window.location.search
+            showStatus(
+                "Please paste a direct video URL first."
             );
-
-        const videoUrl =
-            params.get("video");
-
-
-        if (videoUrl) {
-            return videoUrl;
-        }
-
-
-        /*
-          Default demo video.
-
-          Replace this URL with your own
-          video URL if required.
-        */
-
-        return "";
-    }
-
-
-    /* =========================================================
-       LOAD VIDEO
-    ========================================================= */
-
-    function loadVideo() {
-
-        const videoUrl =
-            getVideoUrl();
-
-
-        if (!videoUrl) {
-
-            placeholder.style.display =
-                "flex";
 
             return;
         }
 
 
-        video.src =
-            videoUrl;
+        showLoading();
 
-        video.load();
-
-        placeholder.style.display =
-            "flex";
-    }
-
-
-    /* =========================================================
-       SHOW ADS
-    ========================================================= */
-
-    async function showAdvertisement() {
-
-        hideMessage();
-
-        showLoading(
-            "Advertisement loading..."
-        );
-
+        hideStatus();
 
         /*
-          If AdsGram SDK/controller
-          is unavailable, continue video.
-        */
-
-        if (!AdController) {
-
-            console.warn(
-                "AdsGram controller unavailable."
-            );
-
-            hideLoading();
-
-            return true;
-        }
-
+         * Try to show AdsGram first.
+         *
+         * If an ad is available:
+         *     ad appears
+         *
+         * If ad is unavailable/error:
+         *     video still plays
+         */
 
         try {
 
-            showLoading(
-                "Please wait for advertisement..."
-            );
+            if (!adController) {
 
+                initializeAds();
 
-            /*
-              AdsGram official API:
-              AdController.show()
-            */
-
-            const result =
-                await AdController.show();
-
-
-            console.log(
-                "AdsGram result:",
-                result
-            );
-
-
-            hideLoading();
-
-            return true;
-
-        } catch (error) {
-
-            console.error(
-                "AdsGram show error:",
-                error
-            );
-
-
-            hideLoading();
-
-
-            /*
-              If there is no ad available,
-              allow the video to continue.
-            */
-
-            showMessage(
-                "Advertisement unavailable. Starting video...",
-                ""
-            );
-
-
-            return true;
-        }
-    }
-
-
-    /* =========================================================
-       PLAY VIDEO AFTER AD
-    ========================================================= */
-
-    async function startVideo() {
-
-        playButton.disabled =
-            true;
-
-
-        hideMessage();
-
-
-        /*
-          STEP 1:
-          Show AdsGram advertisement
-        */
-
-        await showAdvertisement();
-
-
-        /*
-          STEP 2:
-          Start video after ad
-        */
-
-        try {
-
-            if (!video.src) {
-
-                showMessage(
-                    "Video URL is not available.",
-                    "error"
-                );
-
-                playButton.disabled =
-                    false;
-
-                return;
             }
 
 
-            placeholder.style.display =
-                "none";
+            if (adController) {
 
+                showStatus(
+                    "Advertisement loading..."
+                );
 
-            await video.play();
+                try {
 
+                    await adController.show();
 
-            showMessage(
-                "Video started successfully.",
-                "success"
-            );
+                    console.log(
+                        "AdsGram ad finished or closed."
+                    );
 
+                } catch (adError) {
 
-            setTimeout(() => {
+                    console.log(
+                        "AdsGram unavailable:",
+                        adError
+                    );
 
-                hideMessage();
+                }
 
-            }, 2500);
-
+            }
 
         } catch (error) {
 
-            console.error(
-                "Video play error:",
+            console.log(
+                "Advertisement error:",
                 error
-            );
-
-
-            showMessage(
-                "Video play nahi ho paaya. Video URL check karo.",
-                "error"
             );
 
         }
 
 
-        playButton.disabled =
-            false;
+        /*
+         * Continue with video
+         */
+
+        hideLoading();
+
+        showStatus(
+            "Loading video..."
+        );
+
+
+        try {
+
+            videoPlayer.pause();
+
+            videoPlayer.removeAttribute("src");
+
+            videoPlayer.load();
+
+            videoPlayer.src = url;
+
+            videoBox.style.display = "block";
+
+            videoPlayer.load();
+
+
+            /*
+             * Try autoplay after user interaction.
+             * Since this function runs from the Play button,
+             * browsers normally allow playback.
+             */
+
+            try {
+
+                await videoPlayer.play();
+
+                showStatus(
+                    "Video is playing."
+                );
+
+            } catch (playError) {
+
+                console.log(
+                    "Autoplay blocked:",
+                    playError
+                );
+
+                showStatus(
+                    "Video loaded. Press ▶ on the player to start."
+                );
+
+            }
+
+        } catch (error) {
+
+            console.error(
+                "Video loading error:",
+                error
+            );
+
+            showStatus(
+                "Video could not be loaded. Check the video URL."
+            );
+
+        }
+
     }
 
 
-    /* =========================================================
+    /* =========================================
        PLAY BUTTON
-    ========================================================= */
+    ========================================= */
 
     playButton.addEventListener(
         "click",
@@ -834,72 +533,137 @@
     );
 
 
-    /* =========================================================
-       VIDEO EVENTS
-    ========================================================= */
+    /* =========================================
+       TEST ADS BUTTON
+    ========================================= */
 
-    video.addEventListener(
-        "play",
-        () => {
+    demoButton.addEventListener(
+        "click",
+        async function () {
 
-            placeholder.style.display =
-                "none";
-        }
-    );
+            if (!adController) {
 
+                const initialized =
+                    initializeAds();
 
-    video.addEventListener(
-        "pause",
-        () => {
+                if (!initialized) {
 
-            if (
-                video.currentTime === 0
-            ) {
+                    showStatus(
+                        "AdsGram SDK is not loaded."
+                    );
 
-                placeholder.style.display =
-                    "flex";
+                    return;
+                }
             }
-        }
-    );
 
 
-    video.addEventListener(
-        "error",
-        () => {
-
-            showMessage(
-                "Video load nahi ho paaya. Video URL ya hosting check karo.",
-                "error"
+            showStatus(
+                "Testing AdsGram advertisement..."
             );
 
-            placeholder.style.display =
-                "flex";
+
+            try {
+
+                await adController.show();
+
+                showStatus(
+                    "Ad finished or closed."
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "AdsGram test error:",
+                    error
+                );
+
+                showStatus(
+                    "No ad available right now, or the ad could not be shown."
+                );
+
+            }
+
         }
     );
 
 
-    video.addEventListener(
+    /* =========================================
+       VIDEO EVENTS
+    ========================================= */
+
+    videoPlayer.addEventListener(
         "loadedmetadata",
-        () => {
+        function () {
 
             console.log(
                 "Video metadata loaded."
             );
+
         }
     );
 
 
-    /* =========================================================
-       INITIAL START
-    ========================================================= */
+    videoPlayer.addEventListener(
+        "play",
+        function () {
 
-    document.addEventListener(
-        "DOMContentLoaded",
-        () => {
+            showStatus(
+                "Video is playing."
+            );
 
-            initializeAdsGram();
+        }
+    );
 
-            loadVideo();
+
+    videoPlayer.addEventListener(
+        "pause",
+        function () {
+
+            showStatus(
+                "Video paused."
+            );
+
+        }
+    );
+
+
+    videoPlayer.addEventListener(
+        "ended",
+        function () {
+
+            showStatus(
+                "Video finished."
+            );
+
+        }
+    );
+
+
+    videoPlayer.addEventListener(
+        "error",
+        function () {
+
+            showStatus(
+                "Video error. Please check the video URL."
+            );
+
+        }
+    );
+
+
+    /* =========================================
+       ENTER KEY
+    ========================================= */
+
+    videoUrl.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (event.key === "Enter") {
+
+                startVideo();
+
+            }
 
         }
     );
