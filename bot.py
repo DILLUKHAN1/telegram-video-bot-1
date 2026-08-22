@@ -268,7 +268,7 @@ video {{
 
 <div class="wrap">
 
-<h1>🎬 Telegram Video Player</h1>
+<h1>🎬 NIGHT Video Player</h1>
 
 <video
     controls
