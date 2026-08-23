@@ -1,5 +1,6 @@
 import os
 import asyncio
+import html
 from urllib.parse import quote
 
 from aiohttp import web
@@ -43,18 +44,20 @@ if not BOT_TOKEN:
         "BOT_TOKEN environment variable is missing"
     )
 
-
 if not API_ID:
     raise RuntimeError(
         "API_ID environment variable is missing"
     )
-
 
 if not API_HASH:
     raise RuntimeError(
         "API_HASH environment variable is missing"
     )
 
+
+# =========================================================
+# WEB URL
+# =========================================================
 
 if not WEB_URL:
 
@@ -76,7 +79,7 @@ if not WEB_URL:
 
 
 # =========================================================
-# AIROGRAM BOT
+# BOT
 # =========================================================
 
 bot = Bot(
@@ -87,32 +90,31 @@ dp = Dispatcher()
 
 
 # =========================================================
-# PYROGRAM MTProto CLIENT
-#
-# IMPORTANT:
-# no_updates=True
-#
-# Aiogram handles bot messages.
-# Pyrogram is ONLY used for large-file streaming.
+# PYROGRAM MTProto
 # =========================================================
 
 mtproto = Client(
     "night_videos_mtproto",
+
     api_id=int(API_ID),
+
     api_hash=API_HASH,
+
     bot_token=BOT_TOKEN,
+
     no_updates=True,
+
     in_memory=True,
 )
 
 
 # =========================================================
 # STREAM SETTINGS
+#
+# Pyrogram stream_media max chunk = 1 MiB
 # =========================================================
 
 CHUNK_SIZE = 1024 * 1024
-
-MAX_RANGE_REQUEST = 16 * 1024 * 1024
 
 
 # =========================================================
@@ -126,16 +128,13 @@ def make_play_url(
     file_name: str = "video.mp4",
 ) -> str:
 
-    params = (
+    return (
+        f"{WEB_URL.rstrip('/')}"
+        f"/watch?"
         f"file_id={quote(file_id, safe='')}"
         f"&size={int(size_bytes)}"
         f"&mime={quote(mime_type, safe='')}"
         f"&name={quote(file_name, safe='')}"
-    )
-
-    return (
-        f"{WEB_URL.rstrip('/')}"
-        f"/watch?{params}"
     )
 
 
@@ -144,14 +143,13 @@ def make_play_url(
 # =========================================================
 
 @dp.message(CommandStart())
-async def start(
-    message: Message
-):
+async def start(message: Message):
 
     await message.answer(
         "🎬 NIGHT VIDEOS\n\n"
         "Video ya video file bhejo.\n\n"
-        "Main tumhe Play Online button dunga.\n\n"
+        "Forward ki hui video bhi supported hai.\n\n"
+        "Main tumhe ▶️ Play Online button dunga.\n\n"
         "▶️ Play Online = NIGHT VIDEOS Mini App\n\n"
         "/start - Start\n"
         "/help - Help"
@@ -163,19 +161,18 @@ async def start(
 # =========================================================
 
 @dp.message(Command("help"))
-async def help_cmd(
-    message: Message
-):
+async def help_cmd(message: Message):
 
     await message.answer(
-        "📌 NIGHT VIDEOS Help\n\n"
-        "1️⃣ Bot ko video bhejo\n"
-        "2️⃣ Play Online button dabao\n"
-        "3️⃣ AdsGram ad show ho sakta hai\n"
-        "4️⃣ NIGHT VIDEOS Mini App open hoga\n"
-        "5️⃣ Video online play karo\n\n"
-        "Large videos ke liye MTProto streaming "
-        "use hoti hai."
+        "📌 NIGHT VIDEOS HELP\n\n"
+
+        "1️⃣ Video bhejo ya forward karo\n\n"
+        "2️⃣ Bot Play Online button dega\n\n"
+        "3️⃣ Play Online dabao\n\n"
+        "4️⃣ AdsGram ad show hoga\n\n"
+        "5️⃣ Ad ke baad video automatically play hoga\n\n"
+        "6️⃣ Seek / Range requests supported hain\n\n"
+        "🚀 Large video streaming enabled"
     )
 
 
@@ -197,7 +194,6 @@ async def send_received(
         else 0
     )
 
-
     play_url = make_play_url(
         file_id=file_id,
         size_bytes=size_bytes,
@@ -205,12 +201,11 @@ async def send_received(
         file_name=file_name,
     )
 
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="▶️ Play Online",
+                    text="▶️ Watch Now",
                     web_app=WebAppInfo(
                         url=play_url
                     )
@@ -218,7 +213,6 @@ async def send_received(
             ]
         ]
     )
-
 
     size_text = ""
 
@@ -228,38 +222,48 @@ async def send_received(
             f"📁 Size: {size_mb:.2f} MB\n"
         )
 
-
     await message.answer(
         "🌙 NIGHT VIDEOS\n\n"
+
         "✅ Video received!\n\n"
+
         f"{size_text}"
-        "🚀 Large video streaming enabled\n\n"
+
+        "🚀 Large video streaming enabled\n"
+
+        "⏩ Range / Seek supported\n\n"
+
         "👇 Video dekhne ke liye "
-        "Play Online dabao.",
+        "Watch Now dabao.",
         reply_markup=keyboard,
     )
 
 
 # =========================================================
-# VIDEO RECEIVED
+# NORMAL VIDEO
+#
+# Forwarded videos also arrive here.
 # =========================================================
 
 @dp.message(F.video)
-async def video_received(
-    message: Message
-):
+async def video_received(message: Message):
 
     video = message.video
 
-
     await send_received(
         message=message,
+
         file_id=video.file_id,
-        size_bytes=video.file_size or 0,
+
+        size_bytes=(
+            video.file_size or 0
+        ),
+
         mime_type=(
             video.mime_type
             or "video/mp4"
         ),
+
         file_name=(
             video.file_name
             or "video.mp4"
@@ -268,33 +272,27 @@ async def video_received(
 
 
 # =========================================================
-# DOCUMENT VIDEO RECEIVED
+# DOCUMENT VIDEO
+#
+# Forwarded MKV/MP4/etc. files also arrive here.
 # =========================================================
 
 @dp.message(F.document)
-async def document_received(
-    message: Message
-):
+async def document_received(message: Message):
 
     document = message.document
-
 
     mime = (
         document.mime_type
         or ""
     )
 
-
     filename = (
         document.file_name
         or "video"
     )
 
-
-    filename_lower = (
-        filename.lower()
-    )
-
+    filename_lower = filename.lower()
 
     video_extensions = (
         ".mp4",
@@ -310,7 +308,6 @@ async def document_received(
         ".flv",
     )
 
-
     is_video = (
         mime.startswith("video/")
         or filename_lower.endswith(
@@ -318,19 +315,22 @@ async def document_received(
         )
     )
 
-
     if is_video:
 
         await send_received(
             message=message,
+
             file_id=document.file_id,
+
             size_bytes=(
                 document.file_size or 0
             ),
+
             mime_type=(
                 mime
                 or "video/mp4"
             ),
+
             file_name=filename,
         )
 
@@ -339,40 +339,31 @@ async def document_received(
         await message.answer(
             "📄 File received!\n\n"
             f"Name: {filename}\n\n"
-            "▶️ Play Online sirf "
+            "▶️ Watch Now sirf "
             "video files ke liye available hai."
         )
 
 
 # =========================================================
-# HEALTH CHECK
+# HEALTH
 # =========================================================
 
-async def health(
-    request: web.Request
-):
+async def health(request: web.Request):
 
     return web.Response(
-        text=(
-            "NIGHT VIDEOS is running ✅"
-        )
+        text="NIGHT VIDEOS is running ✅"
     )
 
 
 # =========================================================
-# MINI APP PLAYER
+# PLAYER
 # =========================================================
 
-async def player(
-    request: web.Request
-):
+async def player(request: web.Request):
 
-    file_id = (
-        request.query.get(
-            "file_id"
-        )
+    file_id = request.query.get(
+        "file_id"
     )
-
 
     if not file_id:
 
@@ -381,14 +372,18 @@ async def player(
             status=400
         )
 
+    try:
 
-    size = int(
-        request.query.get(
-            "size",
-            "0"
+        size = int(
+            request.query.get(
+                "size",
+                "0"
+            )
         )
-    )
 
+    except ValueError:
+
+        size = 0
 
     mime_type = (
         request.query.get(
@@ -397,7 +392,6 @@ async def player(
         )
     )
 
-
     file_name = (
         request.query.get(
             "name",
@@ -405,6 +399,19 @@ async def player(
         )
     )
 
+    # -----------------------------------------------------
+    # Escape values before putting them inside HTML
+    # -----------------------------------------------------
+
+    safe_mime = html.escape(
+        mime_type,
+        quote=True
+    )
+
+    safe_name = html.escape(
+        file_name,
+        quote=True
+    )
 
     video_url = (
         f"{request.scheme}://"
@@ -419,12 +426,17 @@ async def player(
         f"{quote(file_name, safe='')}"
     )
 
+    safe_video_url = html.escape(
+        video_url,
+        quote=True
+    )
+
 
     # =====================================================
     # HTML
     # =====================================================
 
-    html = f"""
+    html_page = f"""
 <!DOCTYPE html>
 
 <html lang="en">
@@ -448,14 +460,10 @@ async def player(
 <title>NIGHT VIDEOS</title>
 
 
-<!-- TELEGRAM MINI APP -->
-
 <script
     src="https://telegram.org/js/telegram-web-app.js">
 </script>
 
-
-<!-- ADSGRAM -->
 
 <script
     src="https://sad.adsgram.ai/js/sad.min.js">
@@ -515,8 +523,8 @@ body {{
 }}
 
 .logo {{
-    width: 74px;
-    height: 74px;
+    width: 72px;
+    height: 72px;
 
     border-radius: 50%;
 
@@ -536,7 +544,7 @@ body {{
         0 0 30px
         rgba(126,55,255,0.45);
 
-    font-size: 36px;
+    font-size: 34px;
 
     margin-top: 8px;
 
@@ -546,11 +554,9 @@ body {{
 .title {{
     margin: 0;
 
-    font-size: 30px;
+    font-size: 29px;
 
     font-weight: 800;
-
-    letter-spacing: 0.5px;
 
     text-align: center;
 }}
@@ -570,9 +576,9 @@ body {{
 
     max-width: 1000px;
 
-    margin-top: 28px;
+    margin-top: 25px;
 
-    padding: 10px;
+    padding: 9px;
 
     background: #0d0d12;
 
@@ -590,13 +596,44 @@ video {{
 
     width: 100%;
 
-    max-height: 75vh;
+    max-height: 72vh;
 
     background: black;
 
     border-radius: 14px;
 
     object-fit: contain;
+}}
+
+.play-button {{
+    margin-top: 16px;
+
+    padding: 15px 28px;
+
+    border: 0;
+
+    border-radius: 15px;
+
+    color: white;
+
+    font-size: 17px;
+
+    font-weight: 700;
+
+    background:
+        linear-gradient(
+            135deg,
+            #8b2cff,
+            #4c00ff
+        );
+
+    box-shadow:
+        0 10px 30px
+        rgba(100,40,255,0.25);
+}}
+
+.play-button:disabled {{
+    opacity: 0.65;
 }}
 
 .status {{
@@ -610,36 +647,19 @@ video {{
 
     text-align: center;
 
-    color: #a9a9b5;
+    color: #aaaab7;
 
     font-size: 13px;
 }}
 
-.play-button {{
-    margin-top: 15px;
+.info {{
+    margin-top: 10px;
 
-    padding: 14px 25px;
+    color: #777783;
 
-    border: 0;
+    font-size: 11px;
 
-    border-radius: 14px;
-
-    color: white;
-
-    font-size: 16px;
-
-    font-weight: 700;
-
-    background:
-        linear-gradient(
-            135deg,
-            #8b2cff,
-            #4c00ff
-        );
-}}
-
-.play-button:active {{
-    transform: scale(0.98);
+    text-align: center;
 }}
 
 .brand {{
@@ -650,16 +670,6 @@ video {{
     color: #686875;
 
     font-size: 12px;
-
-    text-align: center;
-}}
-
-.info {{
-    margin-top: 10px;
-
-    color: #777783;
-
-    font-size: 11px;
 
     text-align: center;
 }}
@@ -702,8 +712,8 @@ video {{
         >
 
             <source
-                src="{video_url}"
-                type="{mime_type}"
+                src="{safe_video_url}"
+                type="{safe_mime}"
             >
 
             Your browser does not support
@@ -726,12 +736,12 @@ video {{
         id="status"
         class="status"
     >
-        ⏳ Preparing video...
+        🎬 Press Play Video
     </div>
 
 
     <div class="info">
-        📡 Telegram MTProto streaming
+        📡 MTProto • Range • Seek • Large Files
     </div>
 
 
@@ -744,6 +754,10 @@ video {{
 
 
 <script>
+
+/* =====================================================
+   ELEMENTS
+===================================================== */
 
 const video =
     document.getElementById(
@@ -800,8 +814,7 @@ let adController = null;
 try {{
 
     if (
-        window.Adsgram
-        &&
+        window.Adsgram &&
         "{ADSGRAM_BLOCK_ID}"
     ) {{
 
@@ -816,7 +829,7 @@ try {{
 }} catch (error) {{
 
     console.log(
-        "AdsGram init error:",
+        "AdsGram initialization error:",
         error
     );
 
@@ -824,14 +837,14 @@ try {{
 
 
 /* =====================================================
-   SHOW ADSGRAM
+   SHOW AD
 ===================================================== */
 
 async function showAd() {{
 
     if (!adController) {{
 
-        return;
+        return true;
 
     }}
 
@@ -839,10 +852,25 @@ async function showAd() {{
     try {{
 
         status.textContent =
-            "📺 Loading advertisement...";
+            "📺 Advertisement loading...";
 
+
+        /*
+         * Wait until AdsGram resolves.
+         *
+         * For Interstitial:
+         * the promise can resolve when the ad
+         * finishes OR is closed.
+         */
 
         await adController.show();
+
+
+        status.textContent =
+            "✅ Advertisement finished";
+
+
+        return true;
 
 
     }} catch (error) {{
@@ -851,6 +879,86 @@ async function showAd() {{
             "AdsGram error:",
             error
         );
+
+
+        /*
+         * If advertisement is unavailable,
+         * continue to the video.
+         */
+
+        status.textContent =
+            "▶️ Starting video...";
+
+
+        return true;
+
+    }}
+
+}}
+
+
+/* =====================================================
+   START VIDEO
+===================================================== */
+
+async function startVideo() {{
+
+    try {{
+
+        status.textContent =
+            "▶️ Starting video...";
+
+
+        /*
+         * Load metadata first.
+         */
+
+        video.load();
+
+
+        /*
+         * Wait a little for browser
+         * to prepare the media.
+         */
+
+        await new Promise(
+            resolve =>
+                setTimeout(
+                    resolve,
+                    100
+                )
+        );
+
+
+        await video.play();
+
+
+        playButton.style.display =
+            "none";
+
+
+        status.textContent =
+            "▶️ NIGHT VIDEOS";
+
+
+    }} catch (error) {{
+
+        console.log(
+            "Video play error:",
+            error
+        );
+
+
+        status.textContent =
+            "▶️ Tap the video to start";
+
+
+        playButton.disabled =
+            false;
+
+
+        playButton.textContent =
+            "▶️ Play Video";
 
     }}
 
@@ -865,48 +973,29 @@ playButton.addEventListener(
     "click",
     async function() {{
 
-        playButton.disabled = true;
+        playButton.disabled =
+            true;
 
         playButton.textContent =
-            "⏳ Please wait...";
+            "⏳ Loading...";
 
+
+        /*
+         * IMPORTANT:
+         *
+         * User clicks Play
+         *       ↓
+         * AdsGram
+         *       ↓
+         * Ad finishes/closes
+         *       ↓
+         * Video starts automatically
+         */
 
         await showAd();
 
 
-        status.textContent =
-            "▶️ Starting video...";
-
-
-        try {{
-
-            await video.play();
-
-
-            playButton.style.display =
-                "none";
-
-
-        }} catch (error) {{
-
-            console.log(
-                "Play error:",
-                error
-            );
-
-
-            status.textContent =
-                "▶️ Tap video to play";
-
-
-            playButton.disabled =
-                false;
-
-
-            playButton.textContent =
-                "▶️ Play Video";
-
-        }}
+        await startVideo();
 
     }}
 );
@@ -975,8 +1064,14 @@ video.addEventListener(
     "pause",
     function() {{
 
-        status.textContent =
-            "⏸️ Paused";
+        if (
+            !video.ended
+        ) {{
+
+            status.textContent =
+                "⏸️ Paused";
+
+        }}
 
     }}
 );
@@ -1019,13 +1114,13 @@ video.addEventListener(
 
 
     return web.Response(
-        text=html,
+        text=html_page,
         content_type="text/html"
     )
 
 
 # =========================================================
-# PARSE RANGE HEADER
+# RANGE PARSER
 # =========================================================
 
 def parse_range(
@@ -1034,27 +1129,19 @@ def parse_range(
 ):
 
     if not range_header:
-
         return None
-
 
     if not range_header.startswith(
         "bytes="
     ):
-
         return None
 
-
     value = (
-        range_header
-        .replace(
-            "bytes=",
-            "",
-            1
-        )
+        range_header[
+            len("bytes="):
+        ]
         .strip()
     )
-
 
     if "," in value:
 
@@ -1063,23 +1150,23 @@ def parse_range(
             1
         )[0]
 
-
     parts = value.split(
         "-",
         1
     )
 
-
     if len(parts) != 2:
-
         return None
-
 
     start_text = parts[0].strip()
     end_text = parts[1].strip()
 
-
     try:
+
+        # -------------------------------------------------
+        # Suffix range
+        # Example: bytes=-500000
+        # -------------------------------------------------
 
         if start_text == "":
 
@@ -1087,70 +1174,58 @@ def parse_range(
                 end_text
             )
 
-
             if suffix_length <= 0:
-
                 return None
 
-
-            if suffix_length > file_size:
-
-                suffix_length = file_size
-
+            suffix_length = min(
+                suffix_length,
+                file_size
+            )
 
             start = (
                 file_size
                 - suffix_length
             )
 
-            end = (
-                file_size - 1
-            )
+            end = file_size - 1
+
+            return start, end
+
+
+        # -------------------------------------------------
+        # Normal range
+        # Example: bytes=1000-5000
+        # -------------------------------------------------
+
+        start = int(
+            start_text
+        )
+
+        if start < 0:
+            return None
+
+        if start >= file_size:
+            return None
+
+        if end_text == "":
+
+            end = file_size - 1
 
         else:
 
-            start = int(
-                start_text
+            end = int(
+                end_text
             )
 
+            end = min(
+                end,
+                file_size - 1
+            )
 
-            if start < 0:
-
-                return None
-
-
-            if start >= file_size:
-
-                return None
-
-
-            if end_text == "":
-
-                end = (
-                    file_size - 1
-                )
-
-            else:
-
-                end = int(
-                    end_text
-                )
-
-
-                if end >= file_size:
-
-                    end = (
-                        file_size - 1
-                    )
-
-
-            if end < start:
-
-                return None
-
+        if end < start:
+            return None
 
         return start, end
-
 
     except ValueError:
 
@@ -1158,26 +1233,16 @@ def parse_range(
 
 
 # =========================================================
-# VIDEO STREAM
-#
-# IMPORTANT:
-# This uses Pyrogram MTProto instead of
-# Telegram Bot API getFile().
-#
-# This is what removes the 20MB Bot API
-# download bottleneck.
+# STREAM VIDEO
 # =========================================================
 
 async def stream_video(
     request: web.Request
 ):
 
-    file_id = (
-        request.query.get(
-            "file_id"
-        )
+    file_id = request.query.get(
+        "file_id"
     )
-
 
     if not file_id:
 
@@ -1186,6 +1251,10 @@ async def stream_video(
             status=400
         )
 
+
+    # =====================================================
+    # FILE SIZE
+    # =====================================================
 
     try:
 
@@ -1209,6 +1278,10 @@ async def stream_video(
         )
 
 
+    # =====================================================
+    # MIME
+    # =====================================================
+
     mime_type = (
         request.query.get(
             "mime",
@@ -1217,11 +1290,24 @@ async def stream_video(
     )
 
 
+    # =====================================================
+    # FILE NAME
+    # =====================================================
+
     file_name = (
         request.query.get(
             "name",
             "video.mp4"
         )
+    )
+
+
+    # Prevent header injection
+    file_name = (
+        file_name
+        .replace("\r", "")
+        .replace("\n", "")
+        .replace('"', "")
     )
 
 
@@ -1243,7 +1329,7 @@ async def stream_video(
 
 
     # =====================================================
-    # HEAD REQUEST
+    # HEAD
     # =====================================================
 
     if request.method == "HEAD":
@@ -1269,7 +1355,6 @@ async def stream_video(
 
         }
 
-
         return web.Response(
             status=200,
             headers=headers
@@ -1277,7 +1362,7 @@ async def stream_video(
 
 
     # =====================================================
-    # DETERMINE RANGE
+    # DETERMINE BYTE RANGE
     # =====================================================
 
     if requested_range:
@@ -1298,9 +1383,7 @@ async def stream_video(
 
         start_byte = 0
 
-        end_byte = (
-            file_size - 1
-        )
+        end_byte = file_size - 1
 
         content_length = file_size
 
@@ -1328,10 +1411,13 @@ async def stream_video(
             ),
 
         "Cache-Control":
-            "no-cache",
+            "no-cache, no-store",
 
         "X-Content-Type-Options":
             "nosniff",
+
+        "Access-Control-Allow-Origin":
+            "*",
 
     }
 
@@ -1339,7 +1425,8 @@ async def stream_video(
     if status_code == 206:
 
         headers["Content-Range"] = (
-            f"bytes {start_byte}-"
+            f"bytes "
+            f"{start_byte}-"
             f"{end_byte}/"
             f"{file_size}"
         )
@@ -1357,7 +1444,10 @@ async def stream_video(
 
 
     # =====================================================
-    # CALCULATE PYROGRAM CHUNK OFFSET
+    # PYROGRAM CHUNK POSITION
+    #
+    # Pyrogram:
+    # offset = number of 1 MiB chunks to skip
     # =====================================================
 
     first_chunk = (
@@ -1389,7 +1479,7 @@ async def stream_video(
 
 
     # =====================================================
-    # STREAM FROM TELEGRAM
+    # STREAM
     # =====================================================
 
     try:
@@ -1397,16 +1487,13 @@ async def stream_video(
         chunk_number = 0
 
 
-        async for chunk in (
-            mtproto.stream_media(
-                file_id,
-                offset=first_chunk,
-                limit=chunks_needed,
-            )
+        async for chunk in mtproto.stream_media(
+            file_id,
+            offset=first_chunk,
+            limit=chunks_needed,
         ):
 
             if bytes_remaining <= 0:
-
                 break
 
 
@@ -1418,28 +1505,23 @@ async def stream_video(
 
                 if inner_offset:
 
-                    chunk = (
-                        chunk[
-                            inner_offset:
-                        ]
-                    )
+                    chunk = chunk[
+                        inner_offset:
+                    ]
 
 
             # ---------------------------------------------
-            # Don't send more than requested
+            # Don't exceed requested length
             # ---------------------------------------------
 
             if len(chunk) > bytes_remaining:
 
-                chunk = (
-                    chunk[
-                        :bytes_remaining
-                    ]
-                )
+                chunk = chunk[
+                    :bytes_remaining
+                ]
 
 
             if not chunk:
-
                 break
 
 
@@ -1457,7 +1539,6 @@ async def stream_video(
 
 
             if bytes_remaining <= 0:
-
                 break
 
 
@@ -1469,8 +1550,8 @@ async def stream_video(
 
     except asyncio.CancelledError:
 
-        # Browser closed video connection.
-        # This is normal when seeking/stopping.
+        # Browser closed/seeked connection.
+        # Normal behavior.
 
         raise
 
@@ -1478,11 +1559,11 @@ async def stream_video(
     except Exception as error:
 
         print(
-            "================================"
+            "======================================"
         )
 
         print(
-            "MTProto streaming error:"
+            "MTProto STREAMING ERROR"
         )
 
         print(
@@ -1490,7 +1571,7 @@ async def stream_video(
         )
 
         print(
-            "================================"
+            "======================================"
         )
 
 
@@ -1513,7 +1594,7 @@ async def stream_video(
 async def start_web_server():
 
     app = web.Application(
-        client_max_size=1024 * 1024 * 1024 * 10
+        client_max_size=10 * 1024 * 1024 * 1024
     )
 
 
@@ -1531,14 +1612,14 @@ async def start_web_server():
     )
 
 
-    # MINI APP
+    # PLAYER
     app.router.add_get(
         "/watch",
         player
     )
 
 
-    # VIDEO STREAM
+    # STREAM GET
     app.router.add_route(
         "GET",
         "/stream",
@@ -1546,6 +1627,7 @@ async def start_web_server():
     )
 
 
+    # STREAM HEAD
     app.router.add_route(
         "HEAD",
         "/stream",
@@ -1592,7 +1674,15 @@ async def start_web_server():
     )
 
     print(
-        "Large video streaming: ENABLED"
+        "LARGE STREAMING: ENABLED"
+    )
+
+    print(
+        "RANGE / SEEK: ENABLED"
+    )
+
+    print(
+        "FORWARDED VIDEO: ENABLED"
     )
 
     print(
@@ -1600,7 +1690,7 @@ async def start_web_server():
     )
 
     print(
-        "======================================" 
+        "======================================"
     )
 
 
@@ -1610,9 +1700,9 @@ async def start_web_server():
 
 async def main():
 
-    # -----------------------------------------------------
-    # Start MTProto
-    # -----------------------------------------------------
+    # =====================================================
+    # START MTProto
+    # =====================================================
 
     print(
         "Starting Telegram MTProto client..."
@@ -1627,16 +1717,16 @@ async def main():
     )
 
 
-    # -----------------------------------------------------
-    # Start Web Server
-    # -----------------------------------------------------
+    # =====================================================
+    # START WEB SERVER
+    # =====================================================
 
     await start_web_server()
 
 
-    # -----------------------------------------------------
-    # Start Aiogram Bot
-    # -----------------------------------------------------
+    # =====================================================
+    # START BOT
+    # =====================================================
 
     print(
         "Starting NIGHT VIDEOS bot..."
@@ -1652,7 +1742,7 @@ async def main():
     finally:
 
         print(
-            "Stopping bot..."
+            "Stopping NIGHT VIDEOS..." 
         )
 
 
