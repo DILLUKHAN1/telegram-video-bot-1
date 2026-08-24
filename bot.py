@@ -1,9 +1,10 @@
 import os
-import asyncio
-import time
+import json
 import hmac
 import hashlib
-from urllib.parse import quote, urlencode
+import base64
+import asyncio
+from urllib.parse import quote
 
 from aiohttp import web
 
@@ -21,7 +22,7 @@ from pyrogram import Client
 
 # =========================================================
 # NIGHT HUB
-# COMPLETE SECURE BOT.PY
+# SECURE ADMIN UPLOAD + VIDEO LIBRARY
 # =========================================================
 
 
@@ -34,7 +35,12 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 ADMIN_ID = os.getenv("ADMIN_ID")
 
-PORT = int(os.getenv("PORT", "8080"))
+PORT = int(
+    os.getenv(
+        "PORT",
+        "8080"
+    )
+)
 
 WEB_URL = os.getenv("WEB_URL")
 
@@ -43,17 +49,24 @@ ADSGRAM_BLOCK_ID = os.getenv(
     "int-44048"
 )
 
-# Secret used to protect WATCH / STREAM URLs.
-# Railway Environment Variable recommended:
-# STREAM_SECRET
-STREAM_SECRET = os.getenv("STREAM_SECRET")
+# IMPORTANT:
+# Railway/Replit environment variable me ye set karo.
+#
+# Example:
+# WATCH_SECRET=some-long-random-secret
+#
+WATCH_SECRET = os.getenv(
+    "WATCH_SECRET"
+)
 
-if not STREAM_SECRET:
-    STREAM_SECRET = BOT_TOKEN
+if not WATCH_SECRET:
+    raise RuntimeError(
+        "WATCH_SECRET environment variable is missing"
+    )
 
 
 # =========================================================
-# REQUIRED VARIABLES
+# CHECK REQUIRED VARIABLES
 # =========================================================
 
 if not BOT_TOKEN:
@@ -78,15 +91,9 @@ if not ADMIN_ID:
 
 
 try:
-    API_ID = int(API_ID)
-except ValueError:
-    raise RuntimeError(
-        "API_ID must be numeric"
+    ADMIN_ID = int(
+        ADMIN_ID
     )
-
-
-try:
-    ADMIN_ID = int(ADMIN_ID)
 except ValueError:
     raise RuntimeError(
         "ADMIN_ID must be a Telegram numeric user ID"
@@ -116,11 +123,8 @@ if not WEB_URL:
         )
 
 
-WEB_URL = WEB_URL.rstrip("/")
-
-
 # =========================================================
-# AIROGRAM
+# BOT
 # =========================================================
 
 bot = Bot(
@@ -132,14 +136,23 @@ dp = Dispatcher()
 
 # =========================================================
 # PYROGRAM
+# LARGE FILE STREAMING
 # =========================================================
 
 mtproto = Client(
+
     "night_hub_mtproto",
-    api_id=API_ID,
+
+    api_id=int(
+        API_ID
+    ),
+
     api_hash=API_HASH,
+
     bot_token=BOT_TOKEN,
+
     no_updates=True,
+
     in_memory=True,
 )
 
@@ -148,19 +161,95 @@ mtproto = Client(
 # STREAM SETTINGS
 # =========================================================
 
-CHUNK_SIZE = 1024 * 1024
+CHUNK_SIZE = (
+    1024 * 1024
+)
 
-MAX_RANGE_REQUEST = 16 * 1024 * 1024
 
-TOKEN_EXPIRY = 24 * 60 * 60
+# =========================================================
+# VIDEO DATABASE
+# =========================================================
+
+VIDEO_DB = os.getenv(
+    "VIDEO_DB",
+    "videos.json"
+)
+
+
+def load_videos():
+
+    if not os.path.exists(
+        VIDEO_DB
+    ):
+        return []
+
+    try:
+
+        with open(
+            VIDEO_DB,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(
+                file
+            )
+
+            if isinstance(
+                data,
+                list
+            ):
+                return data
+
+    except Exception as error:
+
+        print(
+            "VIDEO DATABASE LOAD ERROR:",
+            repr(error)
+        )
+
+    return []
+
+
+videos = load_videos()
+
+
+def save_videos():
+
+    temp_file = (
+        VIDEO_DB + ".tmp"
+    )
+
+    try:
+
+        with open(
+            temp_file,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                videos,
+                file,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        os.replace(
+            temp_file,
+            VIDEO_DB
+        )
+
+    except Exception as error:
+
+        print(
+            "VIDEO DATABASE SAVE ERROR:",
+            repr(error)
+        )
 
 
 # =========================================================
 # ADMIN UPLOAD STATE
-#
-# IMPORTANT:
-#
-# Video processing starts ONLY after /addvideo.
 # =========================================================
 
 pending_videos = {}
@@ -170,400 +259,202 @@ pending_videos = {}
 # ADMIN CHECK
 # =========================================================
 
-def is_admin(user_id: int) -> bool:
+def is_admin(
+    user_id: int
+) -> bool:
 
-    return user_id == ADMIN_ID
-
-
-# =========================================================
-# UPLOAD STATE CREATOR
-# =========================================================
-
-def create_upload_state():
-
-    return {
-        "active": True,
-        "file_id": None,
-        "file_size": 0,
-        "mime_type": "video/mp4",
-        "file_name": "video.mp4",
-        "cover_file_id": None,
-    }
+    return (
+        user_id == ADMIN_ID
+    )
 
 
 # =========================================================
-# SECURITY TOKEN
+# SIGNED WATCH TOKEN
 # =========================================================
 
-def create_signature(
-    file_id: str,
-    size: int,
-    mime: str,
-    name: str,
-    expires: int,
+def create_watch_token(
+    video_index: int
 ) -> str:
 
-    raw = (
-        f"{file_id}|"
-        f"{size}|"
-        f"{mime}|"
-        f"{name}|"
-        f"{expires}"
+    payload = (
+        str(video_index)
     )
 
     signature = hmac.new(
-        STREAM_SECRET.encode("utf-8"),
-        raw.encode("utf-8"),
-        hashlib.sha256,
+
+        WATCH_SECRET.encode(
+            "utf-8"
+        ),
+
+        payload.encode(
+            "utf-8"
+        ),
+
+        hashlib.sha256
+
     ).hexdigest()
 
-    return signature
-
-
-# =========================================================
-# VERIFY SIGNATURE
-# =========================================================
-
-def verify_signature(
-    file_id: str,
-    size: int,
-    mime: str,
-    name: str,
-    expires: int,
-    signature: str,
-) -> bool:
-
-    if not signature:
-        return False
-
-    if expires <= 0:
-        return False
-
-    if int(time.time()) > expires:
-        return False
-
-    expected = create_signature(
-        file_id=file_id,
-        size=size,
-        mime=mime,
-        name=name,
-        expires=expires,
+    raw = (
+        payload
+        + "."
+        + signature
     )
 
-    return hmac.compare_digest(
-        expected,
-        signature,
+    return base64.urlsafe_b64encode(
+        raw.encode(
+            "utf-8"
+        )
+    ).decode(
+        "utf-8"
     )
 
 
+def verify_watch_token(
+    token: str
+):
+
+    try:
+
+        decoded = base64.urlsafe_b64decode(
+            token.encode(
+                "utf-8"
+            )
+        ).decode(
+            "utf-8"
+        )
+
+        payload, signature = (
+            decoded.split(
+                ".",
+                1
+            )
+        )
+
+        expected = hmac.new(
+
+            WATCH_SECRET.encode(
+                "utf-8"
+            ),
+
+            payload.encode(
+                "utf-8"
+            ),
+
+            hashlib.sha256
+
+        ).hexdigest()
+
+        if not hmac.compare_digest(
+            signature,
+            expected
+        ):
+
+            return None
+
+        index = int(
+            payload
+        )
+
+        if index < 0:
+            return None
+
+        if index >= len(
+            videos
+        ):
+            return None
+
+        return index
+
+    except Exception:
+
+        return None
+
+
 # =========================================================
-# MAKE SECURE PLAY URL
+# WATCH URL
 # =========================================================
 
-def make_play_url(
-    file_id: str,
-    size_bytes: int = 0,
-    mime_type: str = "video/mp4",
-    file_name: str = "video.mp4",
+def make_watch_url(
+    video_index: int
 ) -> str:
 
-    expires = (
-        int(time.time())
-        + TOKEN_EXPIRY
-    )
-
-    signature = create_signature(
-        file_id=file_id,
-        size=size_bytes,
-        mime=mime_type,
-        name=file_name,
-        expires=expires,
-    )
-
-    params = urlencode(
-        {
-            "file_id": file_id,
-            "size": int(size_bytes),
-            "mime": mime_type,
-            "name": file_name,
-            "expires": expires,
-            "sig": signature,
-        }
+    token = create_watch_token(
+        video_index
     )
 
     return (
-        f"{WEB_URL}/watch?"
-        f"{params}"
+        f"{WEB_URL.rstrip('/')}"
+        f"/watch?t="
+        f"{quote(token, safe='')}"
     )
 
 
 # =========================================================
-# EXTRACT AND VERIFY WATCH PARAMETERS
+# WATCH BUTTON
 # =========================================================
 
-def get_secure_params(request):
-
-    file_id = request.query.get(
-        "file_id"
-    )
-
-    if not file_id:
-        return None
-
-    try:
-
-        size = int(
-            request.query.get(
-                "size",
-                "0"
-            )
-        )
-
-    except ValueError:
-
-        return None
-
-    mime = request.query.get(
-        "mime",
-        "video/mp4"
-    )
-
-    name = request.query.get(
-        "name",
-        "video.mp4"
-    )
-
-    try:
-
-        expires = int(
-            request.query.get(
-                "expires",
-                "0"
-            )
-        )
-
-    except ValueError:
-
-        return None
-
-    signature = request.query.get(
-        "sig",
-        ""
-    )
-
-    if not verify_signature(
-        file_id=file_id,
-        size=size,
-        mime=mime,
-        name=name,
-        expires=expires,
-        signature=signature,
-    ):
-
-        return None
-
-    return {
-        "file_id": file_id,
-        "size": size,
-        "mime": mime,
-        "name": name,
-        "expires": expires,
-        "sig": signature,
-    }
-
-
-# =========================================================
-# START
-# =========================================================
-
-@dp.message(CommandStart())
-async def start(
-    message: Message
+def make_watch_keyboard(
+    video_index: int
 ):
 
-    user_id = message.from_user.id
-
-    if is_admin(user_id):
-
-        await message.answer(
-            "🌙 <b>NIGHT HUB</b>\n\n"
-            "👑 <b>ADMIN MODE</b>\n\n"
-            "📹 Video upload ke liye:\n"
-            "<code>/addvideo</code>\n\n"
-            "Uske baad:\n"
-            "1️⃣ Video bhejo\n"
-            "2️⃣ Cover Photo bhejo\n"
-            "3️⃣ Bot WATCH NOW banayega\n\n"
-            "Commands:\n"
-            "/addvideo\n"
-            "/cancel\n"
-            "/usecover\n"
-            "/help",
-            parse_mode="HTML",
-        )
-
-    else:
-
-        await message.answer(
-            "🌙 <b>NIGHT HUB</b>\n\n"
-            "🎬 <b>Welcome!</b>\n\n"
-            "Video dekhne ke liye "
-            "👉 <b>WATCH NOW</b> button use karein.\n\n"
-            "🔒 Video upload access "
-            "sirf Admin ke liye hai.",
-            parse_mode="HTML",
-        )
-
-
-# =========================================================
-# HELP
-# =========================================================
-
-@dp.message(Command("help"))
-async def help_cmd(
-    message: Message
-):
-
-    user_id = message.from_user.id
-
-    if is_admin(user_id):
-
-        await message.answer(
-            "🌙 <b>NIGHT HUB ADMIN HELP</b>\n\n"
-            "📌 Upload process:\n\n"
-            "1️⃣ <code>/addvideo</code>\n"
-            "2️⃣ Video ya forwarded video bhejo\n"
-            "3️⃣ Cover Photo bhejo\n"
-            "4️⃣ WATCH NOW automatically create hoga\n\n"
-            "Commands:\n"
-            "• /start\n"
-            "• /addvideo\n"
-            "• /cancel\n"
-            "• /usecover\n"
-            "• /help",
-            parse_mode="HTML",
-        )
-
-    else:
-
-        await message.answer(
-            "🌙 <b>NIGHT HUB</b>\n\n"
-            "👉 WATCH NOW button se video open karein.",
-            parse_mode="HTML",
-        )
-
-
-# =========================================================
-# ADD VIDEO
-# =========================================================
-
-@dp.message(Command("addvideo"))
-async def add_video_cmd(
-    message: Message
-):
-
-    user_id = message.from_user.id
-
-    # -----------------------------------------------------
-    # STRICT ADMIN CHECK
-    # -----------------------------------------------------
-
-    if not is_admin(user_id):
-
-        await message.answer(
-            "❌ <b>ACCESS DENIED</b>\n\n"
-            "Sirf NIGHT HUB Admin "
-            "video upload kar sakta hai.",
-            parse_mode="HTML",
-        )
-
-        return
-
-    # -----------------------------------------------------
-    # CREATE NEW UPLOAD SESSION
-    # -----------------------------------------------------
-
-    pending_videos[user_id] = (
-        create_upload_state()
+    url = make_watch_url(
+        video_index
     )
 
-    await message.answer(
-        "👑 <b>ADMIN UPLOAD MODE</b>\n\n"
-        "✅ Upload mode active hai.\n\n"
-        "📹 Ab video ya forwarded video bhejo.\n\n"
-        "Video receive hone ke baad "
-        "main Cover Photo maangunga.\n\n"
-        "❌ Cancel karne ke liye:\n"
-        "<code>/cancel</code>",
-        parse_mode="HTML",
-    )
+    return InlineKeyboardMarkup(
 
-
-# =========================================================
-# CANCEL
-# =========================================================
-
-@dp.message(Command("cancel"))
-async def cancel_cmd(
-    message: Message
-):
-
-    user_id = message.from_user.id
-
-    if not is_admin(user_id):
-        return
-
-    if user_id in pending_videos:
-
-        del pending_videos[user_id]
-
-        await message.answer(
-            "❌ <b>UPLOAD CANCELLED</b>",
-            parse_mode="HTML",
-        )
-
-    else:
-
-        await message.answer(
-            "ℹ️ Koi active upload session nahi hai."
-        )
-
-
-# =========================================================
-# SEND WATCH NOW
-# =========================================================
-
-async def send_watch_result(
-    message: Message,
-    file_id: str,
-    size_bytes: int,
-    mime_type: str,
-    file_name: str,
-    cover_file_id: str = None,
-):
-
-    play_url = make_play_url(
-        file_id=file_id,
-        size_bytes=size_bytes,
-        mime_type=mime_type,
-        file_name=file_name,
-    )
-
-    keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
+
             [
+
                 InlineKeyboardButton(
+
                     text="👉 𝐖𝐀𝐓𝐂𝐇 𝐍𝐎𝐖 👈",
+
                     web_app=WebAppInfo(
-                        url=play_url
-                    ),
+                        url=url
+                    )
+
                 )
+
             ]
+
         ]
+
+    )
+
+
+# =========================================================
+# SEND ONE VIDEO TO USER
+# =========================================================
+
+async def send_video_card(
+    message: Message,
+    video_index: int
+):
+
+    if video_index < 0:
+        return
+
+    if video_index >= len(
+        videos
+    ):
+        return
+
+    data = videos[
+        video_index
+    ]
+
+    cover_file_id = data.get(
+        "cover_file_id"
+    )
+
+    keyboard = make_watch_keyboard(
+        video_index
     )
 
     # -----------------------------------------------------
-    # CUSTOM COVER
+    # COVER PHOTO
     # -----------------------------------------------------
 
     if cover_file_id:
@@ -571,16 +462,15 @@ async def send_watch_result(
         try:
 
             await message.answer_photo(
+
                 photo=cover_file_id,
-                caption=(
-                    "🌙 <b>NIGHT HUB</b>\n\n"
-                    "🎬 <b>Video Ready</b>\n\n"
-                    "👇 Watch karne ke liye "
-                    "<b>WATCH NOW</b> dabayein."
-                ),
+
+                caption="",
+
                 reply_markup=keyboard,
-                protect_content=True,
-                parse_mode="HTML",
+
+                protect_content=True
+
             )
 
             return
@@ -588,8 +478,8 @@ async def send_watch_result(
         except Exception as error:
 
             print(
-                "Custom cover error:",
-                repr(error),
+                "COVER SEND ERROR:",
+                repr(error)
             )
 
     # -----------------------------------------------------
@@ -597,243 +487,523 @@ async def send_watch_result(
     # -----------------------------------------------------
 
     await message.answer(
-        "🌙 <b>NIGHT HUB</b>\n\n"
-        "🎬 <b>Video Ready</b>\n\n"
-        "👇 Video dekhne ke liye "
-        "<b>WATCH NOW</b> dabayein.",
+
+        "🎬",
+
         reply_markup=keyboard,
-        parse_mode="HTML",
-        protect_content=True,
+
+        protect_content=True
+
     )
 
 
 # =========================================================
-# FINALIZE ADMIN VIDEO
+# SEND ALL VIDEOS
 # =========================================================
 
-async def finalize_admin_video(
-    message: Message,
-    user_id: int,
+async def send_all_videos(
+    message: Message
 ):
 
-    if not is_admin(user_id):
-        return
-
-    if user_id not in pending_videos:
-        return
-
-    data = pending_videos[user_id]
-
-    file_id = data.get(
-        "file_id"
+    total = len(
+        videos
     )
 
-    if not file_id:
+    if total == 0:
 
         await message.answer(
-            "❌ Video information missing."
+
+            "🌙 <b>NIGHT HUB</b>\n\n"
+
+            "🎬 Abhi koi video available nahi hai.",
+
+            parse_mode="HTML"
+
         )
 
         return
 
-    file_size = data.get(
-        "file_size",
-        0,
+
+    await message.answer(
+
+        "🌙 <b>NIGHT HUB</b>\n\n"
+
+        f"🎬 <b>{total} videos available</b>\n\n"
+
+        "👇 Video select karke "
+        "<b>WATCH NOW</b> press karein.",
+
+        parse_mode="HTML"
+
     )
 
-    mime_type = data.get(
-        "mime_type",
-        "video/mp4",
-    )
 
-    file_name = data.get(
-        "file_name",
-        "video.mp4",
-    )
+    # -----------------------------------------------------
+    # OLD TO NEW
+    # -----------------------------------------------------
 
-    cover_file_id = data.get(
-        "cover_file_id"
+    for index in range(
+        total
+    ):
+
+        try:
+
+            await send_video_card(
+
+                message,
+                index
+
+            )
+
+            # Telegram flood protection
+            await asyncio.sleep(
+                0.15
+            )
+
+        except Exception as error:
+
+            print(
+                "VIDEO CARD ERROR:",
+                repr(error)
+            )
+
+
+# =========================================================
+# START
+# =========================================================
+
+@dp.message(
+    CommandStart()
+)
+async def start(
+    message: Message
+):
+
+    user_id = (
+        message.from_user.id
     )
 
     # -----------------------------------------------------
-    # DELETE SESSION
+    # ADMIN
     # -----------------------------------------------------
 
-    del pending_videos[user_id]
+    if is_admin(
+        user_id
+    ):
+
+        await message.answer(
+
+            "🌙 <b>NIGHT HUB</b>\n\n"
+
+            "👑 <b>ADMIN MODE</b>\n\n"
+
+            "📹 New video add karne ke liye:\n"
+            "/addvideo\n\n"
+
+            "📚 Neeche current video library bhi "
+            "dikhayi ja rahi hai.\n\n"
+
+            "🔒 Upload access sirf aapke account ke liye enabled hai.",
+
+            parse_mode="HTML"
+
+        )
+
+    else:
+
+        await message.answer(
+
+            "🌙 <b>NIGHT HUB</b>\n\n"
+
+            "🎬 Welcome!\n\n"
+
+            "👇 Available videos neeche hain.\n\n"
+
+            "👉 <b>WATCH NOW</b> par click karein.",
+
+            parse_mode="HTML"
+
+        )
+
 
     # -----------------------------------------------------
-    # CREATE WATCH NOW
+    # SHOW ALL SAVED VIDEOS
     # -----------------------------------------------------
 
-    await send_watch_result(
-        message=message,
-        file_id=file_id,
-        size_bytes=file_size,
-        mime_type=mime_type,
-        file_name=file_name,
-        cover_file_id=cover_file_id,
+    await send_all_videos(
+        message
+    )
+
+
+# =========================================================
+# HELP
+# =========================================================
+
+@dp.message(
+    Command("help")
+)
+async def help_cmd(
+    message: Message
+):
+
+    user_id = (
+        message.from_user.id
+    )
+
+    if is_admin(
+        user_id
+    ):
+
+        await message.answer(
+
+            "🌙 <b>NIGHT HUB ADMIN HELP</b>\n\n"
+
+            "/addvideo - New video\n"
+            "/cancel - Cancel upload\n"
+            "/videos - Show all videos\n"
+            "/help - Help\n\n"
+
+            "Upload process:\n"
+            "1️⃣ /addvideo\n"
+            "2️⃣ Video / forwarded video\n"
+            "3️⃣ Cover photo\n"
+            "4️⃣ WATCH NOW generated",
+
+            parse_mode="HTML"
+
+        )
+
+    else:
+
+        await message.answer(
+
+            "🌙 <b>NIGHT HUB</b>\n\n"
+
+            "👉 Available videos /start par mil jayengi.",
+
+            parse_mode="HTML"
+
+        )
+
+
+# =========================================================
+# VIDEOS COMMAND
+# =========================================================
+
+@dp.message(
+    Command("videos")
+)
+async def videos_cmd(
+    message: Message
+):
+
+    await send_all_videos(
+        message
+    )
+
+
+# =========================================================
+# ADD VIDEO
+# =========================================================
+
+@dp.message(
+    Command("addvideo")
+)
+async def add_video_cmd(
+    message: Message
+):
+
+    user_id = (
+        message.from_user.id
+    )
+
+    # -----------------------------------------------------
+    # HARD ADMIN LOCK
+    # -----------------------------------------------------
+
+    if not is_admin(
+        user_id
+    ):
+
+        await message.answer(
+
+            "❌ <b>ACCESS DENIED</b>\n\n"
+
+            "Sirf Admin video upload kar sakta hai.",
+
+            parse_mode="HTML"
+
+        )
+
+        return
+
+
+    pending_videos[
+        user_id
+    ] = {
+
+        "file_id": None,
+
+        "file_size": 0,
+
+        "mime_type": "video/mp4",
+
+        "file_name": "video.mp4",
+
+        "cover_file_id": None,
+
+    }
+
+
+    await message.answer(
+
+        "👑 <b>ADMIN UPLOAD MODE</b>\n\n"
+
+        "📹 Ab video ya forwarded video bhejo.\n\n"
+
+        "Uske baad cover photo bhejna hai.",
+
+        parse_mode="HTML"
+
+    )
+
+
+# =========================================================
+# CANCEL
+# =========================================================
+
+@dp.message(
+    Command("cancel")
+)
+async def cancel_cmd(
+    message: Message
+):
+
+    user_id = (
+        message.from_user.id
+    )
+
+    if not is_admin(
+        user_id
+    ):
+        return
+
+    pending_videos.pop(
+        user_id,
+        None
+    )
+
+    await message.answer(
+        "❌ Upload cancelled."
     )
 
 
 # =========================================================
 # VIDEO RECEIVED
 #
-# IMPORTANT:
-# Admin MUST use /addvideo first.
+# ONLY ADMIN
 # =========================================================
 
-@dp.message(F.video)
+@dp.message(
+    F.video
+)
 async def video_received(
     message: Message
 ):
 
-    user_id = message.from_user.id
+    user_id = (
+        message.from_user.id
+    )
 
-    # -----------------------------------------------------
-    # NORMAL USER
-    # -----------------------------------------------------
+    # =====================================================
+    # HARD PUBLIC BLOCK
+    # =====================================================
 
-    if not is_admin(user_id):
+    if not is_admin(
+        user_id
+    ):
 
         await message.answer(
+
             "🔒 <b>UPLOAD DISABLED</b>\n\n"
-            "Sirf NIGHT HUB Admin "
-            "videos upload kar sakta hai.",
-            parse_mode="HTML",
+
+            "Public users video upload nahi kar sakte.",
+
+            parse_mode="HTML"
+
         )
 
         return
 
-    # -----------------------------------------------------
-    # ADMIN BUT NO ACTIVE SESSION
-    # -----------------------------------------------------
+
+    # =====================================================
+    # ADMIN MUST START /ADDVIDEO
+    # =====================================================
 
     if user_id not in pending_videos:
 
         await message.answer(
-            "⚠️ <b>UPLOAD MODE OFF</b>\n\n"
-            "Pehle <code>/addvideo</code> bhejo.",
-            parse_mode="HTML",
+
+            "⚠️ Pehle /addvideo command bhejo."
+
         )
 
         return
 
-    # -----------------------------------------------------
-    # GET VIDEO
-    # -----------------------------------------------------
 
     video = message.video
 
-    pending_videos[user_id]["file_id"] = (
+
+    pending_videos[
+        user_id
+    ]["file_id"] = (
         video.file_id
     )
 
-    pending_videos[user_id]["file_size"] = (
+
+    pending_videos[
+        user_id
+    ]["file_size"] = (
         video.file_size or 0
     )
 
-    pending_videos[user_id]["mime_type"] = (
-        video.mime_type or "video/mp4"
+
+    pending_videos[
+        user_id
+    ]["mime_type"] = (
+
+        video.mime_type
+        or "video/mp4"
+
     )
 
-    pending_videos[user_id]["file_name"] = (
-        video.file_name or "video.mp4"
+
+    pending_videos[
+        user_id
+    ]["file_name"] = (
+
+        video.file_name
+        or "video.mp4"
+
     )
 
-    # -----------------------------------------------------
-    # TELEGRAM THUMBNAIL
-    # -----------------------------------------------------
 
+    # Telegram thumbnail
     try:
 
         if video.thumbnail:
 
-            pending_videos[user_id][
-                "cover_file_id"
-            ] = video.thumbnail.file_id
+            pending_videos[
+                user_id
+            ]["cover_file_id"] = (
+                video.thumbnail.file_id
+            )
 
     except Exception as error:
 
         print(
-            "Video thumbnail error:",
-            repr(error),
+            "VIDEO THUMBNAIL ERROR:",
+            repr(error)
         )
 
-    # -----------------------------------------------------
-    # ASK COVER
-    # -----------------------------------------------------
 
     await message.answer(
+
         "✅ <b>VIDEO RECEIVED</b>\n\n"
-        f"📁 <b>{video.file_name or 'video.mp4'}</b>\n"
-        f"📦 Size: "
+
+        f"📁 {video.file_name or 'video.mp4'}\n"
+
+        f"📦 "
         f"{(video.file_size or 0) / (1024 * 1024):.2f} MB\n\n"
+
         "🖼️ Ab <b>Cover Photo</b> bhejo.\n\n"
-        "Agar Telegram thumbnail use karna hai:\n"
-        "<code>/usecover</code>",
-        parse_mode="HTML",
+
+        "Ya Telegram thumbnail use karna ho "
+        "to /usecover bhejo.",
+
+        parse_mode="HTML"
+
     )
 
 
 # =========================================================
-# DOCUMENT VIDEO
+# DOCUMENT RECEIVED
 #
-# Supports forwarded video files as Documents.
+# ONLY ADMIN
+# Supports forwarded video files
 # =========================================================
 
-@dp.message(F.document)
+@dp.message(
+    F.document
+)
 async def document_received(
     message: Message
 ):
 
-    user_id = message.from_user.id
+    user_id = (
+        message.from_user.id
+    )
 
-    # -----------------------------------------------------
-    # NORMAL USER
-    # -----------------------------------------------------
+    # =====================================================
+    # HARD PUBLIC BLOCK
+    # =====================================================
 
-    if not is_admin(user_id):
+    if not is_admin(
+        user_id
+    ):
 
         await message.answer(
+
             "🔒 <b>UPLOAD DISABLED</b>\n\n"
-            "Sirf NIGHT HUB Admin "
-            "videos upload kar sakta hai.",
-            parse_mode="HTML",
+
+            "Public users video upload nahi kar sakte.",
+
+            parse_mode="HTML"
+
         )
 
         return
 
-    # -----------------------------------------------------
-    # ADMIN BUT NO ACTIVE SESSION
-    # -----------------------------------------------------
+
+    # =====================================================
+    # ADMIN MUST START /ADDVIDEO
+    # =====================================================
 
     if user_id not in pending_videos:
 
         await message.answer(
-            "⚠️ <b>UPLOAD MODE OFF</b>\n\n"
-            "Pehle <code>/addvideo</code> bhejo.",
-            parse_mode="HTML",
+
+            "⚠️ Pehle /addvideo command bhejo."
+
         )
 
         return
 
-    document = message.document
+
+    document = (
+        message.document
+    )
+
 
     mime = (
         document.mime_type
         or ""
     )
 
+
     filename = (
         document.file_name
         or "video"
     )
 
+
     filename_lower = (
         filename.lower()
     )
 
+
     video_extensions = (
+
         ".mp4",
         ".mkv",
         ".webm",
@@ -845,244 +1015,465 @@ async def document_received(
         ".3gp",
         ".ts",
         ".flv",
+
     )
 
+
     is_video = (
-        mime.startswith("video/")
+
+        mime.startswith(
+            "video/"
+        )
+
         or filename_lower.endswith(
             video_extensions
         )
+
     )
+
 
     if not is_video:
 
         await message.answer(
-            "📄 File received.\n\n"
+
             "❌ Ye video file nahi lag rahi."
+
         )
 
         return
 
-    # -----------------------------------------------------
-    # SAVE FILE
-    # -----------------------------------------------------
 
-    pending_videos[user_id]["file_id"] = (
+    pending_videos[
+        user_id
+    ]["file_id"] = (
         document.file_id
     )
 
-    pending_videos[user_id]["file_size"] = (
+
+    pending_videos[
+        user_id
+    ]["file_size"] = (
         document.file_size or 0
     )
 
-    pending_videos[user_id]["mime_type"] = (
-        mime or "video/mp4"
+
+    pending_videos[
+        user_id
+    ]["mime_type"] = (
+
+        mime
+        or "video/mp4"
+
     )
 
-    pending_videos[user_id]["file_name"] = (
+
+    pending_videos[
+        user_id
+    ]["file_name"] = (
         filename
     )
 
-    # -----------------------------------------------------
-    # DOCUMENT THUMBNAIL
-    # -----------------------------------------------------
 
+    # Telegram thumbnail
     try:
 
         if document.thumbnail:
 
-            pending_videos[user_id][
-                "cover_file_id"
-            ] = document.thumbnail.file_id
+            pending_videos[
+                user_id
+            ]["cover_file_id"] = (
+                document.thumbnail.file_id
+            )
 
     except Exception as error:
 
         print(
-            "Document thumbnail error:",
-            repr(error),
+            "DOCUMENT THUMBNAIL ERROR:",
+            repr(error)
         )
 
+
     await message.answer(
+
         "✅ <b>VIDEO FILE RECEIVED</b>\n\n"
-        f"📁 <b>{filename}</b>\n"
-        f"📦 Size: "
+
+        f"📁 {filename}\n"
+
+        f"📦 "
         f"{(document.file_size or 0) / (1024 * 1024):.2f} MB\n\n"
+
         "🖼️ Ab <b>Cover Photo</b> bhejo.\n\n"
-        "Telegram thumbnail use karna hai:\n"
-        "<code>/usecover</code>",
-        parse_mode="HTML",
+
+        "Ya Telegram thumbnail use karna ho "
+        "to /usecover bhejo.",
+
+        parse_mode="HTML"
+
     )
 
 
 # =========================================================
 # COVER PHOTO
+#
+# ONLY ADMIN
 # =========================================================
 
-@dp.message(F.photo)
+@dp.message(
+    F.photo
+)
 async def cover_received(
     message: Message
 ):
 
-    user_id = message.from_user.id
+    user_id = (
+        message.from_user.id
+    )
+
 
     # -----------------------------------------------------
-    # NORMAL USER
+    # HARD ADMIN LOCK
     # -----------------------------------------------------
 
-    if not is_admin(user_id):
+    if not is_admin(
+        user_id
+    ):
 
         await message.answer(
-            "🔒 Sirf Admin cover upload kar sakta hai."
+
+            "🔒 Sirf Admin cover photo upload kar sakta hai."
+
         )
 
         return
 
+
     # -----------------------------------------------------
-    # NO ACTIVE SESSION
+    # CHECK PENDING
     # -----------------------------------------------------
 
     if user_id not in pending_videos:
 
         await message.answer(
-            "⚠️ Pehle <code>/addvideo</code> bhejo.",
-            parse_mode="HTML",
+
+            "⚠️ Pehle /addvideo se video add karo."
+
         )
 
         return
 
-    # -----------------------------------------------------
-    # GET HIGHEST QUALITY PHOTO
-    # -----------------------------------------------------
 
-    photo = message.photo[-1]
+    photo = (
+        message.photo[-1]
+    )
 
-    pending_videos[user_id][
-        "cover_file_id"
-    ] = photo.file_id
+
+    pending_videos[
+        user_id
+    ]["cover_file_id"] = (
+        photo.file_id
+    )
+
 
     await message.answer(
+
         "🖼️ <b>COVER RECEIVED</b>\n\n"
-        "⏳ Creating WATCH NOW...\n\n"
-        "Please wait...",
-        parse_mode="HTML",
+
+        "⏳ Video library me save ho rahi hai...",
+
+        parse_mode="HTML"
+
     )
+
 
     await finalize_admin_video(
-        message=message,
-        user_id=user_id,
+        message,
+        user_id
     )
 
 
 # =========================================================
-# USE TELEGRAM COVER
+# USE TELEGRAM THUMBNAIL
 # =========================================================
 
-@dp.message(Command("usecover"))
+@dp.message(
+    Command("usecover")
+)
 async def use_cover_cmd(
     message: Message
 ):
 
-    user_id = message.from_user.id
+    user_id = (
+        message.from_user.id
+    )
 
-    if not is_admin(user_id):
+
+    if not is_admin(
+        user_id
+    ):
         return
+
 
     if user_id not in pending_videos:
 
         await message.answer(
-            "❌ Pehle <code>/addvideo</code> "
-            "aur video bhejo.",
-            parse_mode="HTML",
+            "❌ Pehle video bhejo."
         )
 
         return
 
-    data = pending_videos[user_id]
 
-    if not data.get("cover_file_id"):
+    data = pending_videos[
+        user_id
+    ]
+
+
+    if not data.get(
+        "cover_file_id"
+    ):
 
         await message.answer(
+
             "⚠️ Telegram thumbnail available nahi hai.\n\n"
-            "Please custom Cover Photo bhejo."
+            "Custom cover photo bhejo."
+
         )
 
         return
 
+
     await message.answer(
-        "🖼️ Telegram thumbnail ko Cover ke "
-        "roop mein use kiya ja raha hai...\n\n"
+
+        "🖼️ Telegram thumbnail use ho raha hai...\n\n"
         "⏳ Please wait..."
+
     )
+
 
     await finalize_admin_video(
-        message=message,
-        user_id=user_id,
+        message,
+        user_id
     )
 
 
 # =========================================================
-# HEALTH
+# FINALIZE ADMIN VIDEO
 # =========================================================
 
-async def health(
-    request: web.Request
+async def finalize_admin_video(
+    message: Message,
+    user_id: int
 ):
 
-    return web.Response(
-        text="NIGHT HUB is running ✅"
+    if not is_admin(
+        user_id
+    ):
+        return
+
+
+    if user_id not in pending_videos:
+        return
+
+
+    data = pending_videos[
+        user_id
+    ]
+
+
+    file_id = data.get(
+        "file_id"
+    )
+
+
+    if not file_id:
+
+        await message.answer(
+            "❌ Video file missing."
+        )
+
+        return
+
+
+    # -----------------------------------------------------
+    # CREATE DATABASE RECORD
+    # -----------------------------------------------------
+
+    video_record = {
+
+        "file_id":
+            file_id,
+
+        "file_size":
+            int(
+                data.get(
+                    "file_size",
+                    0
+                )
+            ),
+
+        "mime_type":
+            data.get(
+                "mime_type",
+                "video/mp4"
+            ),
+
+        "file_name":
+            data.get(
+                "file_name",
+                "video.mp4"
+            ),
+
+        "cover_file_id":
+            data.get(
+                "cover_file_id"
+            ),
+
+    }
+
+
+    # -----------------------------------------------------
+    # SAVE
+    # -----------------------------------------------------
+
+    videos.append(
+        video_record
+    )
+
+
+    save_videos()
+
+
+    # -----------------------------------------------------
+    # INDEX
+    # -----------------------------------------------------
+
+    video_index = (
+        len(videos) - 1
+    )
+
+
+    # -----------------------------------------------------
+    # CLEAR STATE
+    # -----------------------------------------------------
+
+    pending_videos.pop(
+        user_id,
+        None
+    )
+
+
+    # -----------------------------------------------------
+    # SEND RESULT
+    # -----------------------------------------------------
+
+    await message.answer(
+
+        "✅ <b>VIDEO ADDED SUCCESSFULLY</b>\n\n"
+
+        f"🎬 Video #{video_index + 1}\n"
+
+        "🖼️ Cover saved\n"
+        "👉 WATCH NOW created\n"
+        "💾 Permanently saved in video library\n\n"
+
+        "👤 Ab koi bhi user /start karega "
+        "to ye video uski video library me dikhegi.",
+
+        parse_mode="HTML"
+
+    )
+
+
+    await send_video_card(
+        message,
+        video_index
     )
 
 
 # =========================================================
-# MINI APP PLAYER
+# PLAYER PAGE
 # =========================================================
 
 async def player(
     request: web.Request
 ):
 
-    params = get_secure_params(
-        request
+    token = (
+        request.query.get(
+            "t"
+        )
     )
 
-    if not params:
+
+    if not token:
 
         return web.Response(
-            text="Invalid or expired video link.",
-            status=403,
+
+            text="Invalid watch link",
+
+            status=403
+
         )
 
-    file_id = params["file_id"]
-    size = params["size"]
-    mime_type = params["mime"]
-    file_name = params["name"]
-    expires = params["expires"]
-    signature = params["sig"]
 
-    # -----------------------------------------------------
-    # SECURE STREAM URL
-    # -----------------------------------------------------
-
-    stream_params = urlencode(
-        {
-            "file_id": file_id,
-            "size": size,
-            "mime": mime_type,
-            "name": file_name,
-            "expires": expires,
-            "sig": signature,
-        }
+    video_index = verify_watch_token(
+        token
     )
 
-    video_url = (
+
+    if video_index is None:
+
+        return web.Response(
+
+            text="Invalid or expired watch link",
+
+            status=403
+
+        )
+
+
+    data = videos[
+        video_index
+    ]
+
+
+    file_id = data.get(
+        "file_id"
+    )
+
+
+    size = int(
+        data.get(
+            "file_size",
+            0
+        )
+    )
+
+
+    mime_type = data.get(
+        "mime_type",
+        "video/mp4"
+    )
+
+
+    file_name = data.get(
+        "file_name",
+        "video.mp4"
+    )
+
+
+    stream_url = (
+
         f"{request.scheme}://"
         f"{request.host}"
         f"/stream?"
-        f"{stream_params}"
+        f"t="
+        f"{quote(token, safe='')}"
+
     )
 
+
     # =====================================================
-    # MINI APP HTML
+    # PLAYER HTML
     # =====================================================
 
     html = f"""
@@ -1095,30 +1486,23 @@ async def player(
 <meta charset="UTF-8">
 
 <meta
-    name="viewport"
-    content="width=device-width,
-    initial-scale=1.0,
-    maximum-scale=1.0,
-    viewport-fit=cover"
+name="viewport"
+content="width=device-width,
+initial-scale=1.0,
+maximum-scale=1.0,
+viewport-fit=cover"
 >
 
 <meta
-    name="theme-color"
-    content="#050507"
+name="theme-color"
+content="#050507"
 >
 
 <title>NIGHT HUB</title>
 
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-<script
-src="https://telegram.org/js/telegram-web-app.js">
-</script>
-
-
-<script
-src="https://sad.adsgram.ai/js/sad.min.js">
-</script>
-
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 
 <style>
 
@@ -1130,15 +1514,13 @@ html,
 body {{
     margin: 0;
     padding: 0;
-
-    width: 100%;
     min-height: 100%;
 
     background:
         radial-gradient(
             circle at 20% 0%,
-            #26183d 0%,
-            #0b0911 35%,
+            #291640 0%,
+            #0b0810 35%,
             #030305 100%
         );
 
@@ -1154,110 +1536,95 @@ body {{
 
 body {{
     min-height: 100vh;
-    overflow-x: hidden;
 }}
 
 .container {{
-    width: 100%;
     min-height: 100vh;
 
     display: flex;
     flex-direction: column;
+
     align-items: center;
 
     padding:
-        calc(18px + env(safe-area-inset-top))
-        12px
+        calc(16px + env(safe-area-inset-top))
+        10px
         calc(24px + env(safe-area-inset-bottom));
 }}
 
 .header {{
     width: 100%;
-    max-width: 1000px;
+    max-width: 1100px;
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    flex-direction: column;
+    text-align: center;
 }}
 
 .logo {{
-    width: 68px;
-    height: 68px;
+    width: 62px;
+    height: 62px;
 
-    border-radius: 22px;
+    margin: 0 auto 10px;
 
     display: flex;
     align-items: center;
     justify-content: center;
+
+    border-radius: 20px;
 
     background:
         linear-gradient(
             135deg,
-            #9b4dff,
-            #4a00ff
+            #a855f7,
+            #4c1d95
         );
 
     box-shadow:
-        0 10px 40px
-        rgba(108,55,255,0.35);
+        0 15px 45px
+        rgba(168,85,247,.35);
 
-    font-size: 32px;
-
-    margin-top: 4px;
-    margin-bottom: 12px;
+    font-size: 30px;
 }}
 
 .title {{
     margin: 0;
 
-    font-size: 28px;
-
+    font-size: 27px;
     font-weight: 900;
 
     letter-spacing: 1px;
-
-    text-align: center;
 }}
 
 .subtitle {{
-    margin-top: 6px;
+    margin-top: 5px;
 
-    color: #9997a7;
+    font-size: 12px;
 
-    font-size: 13px;
-
-    text-align: center;
+    color: #96929f;
 }}
 
 .player-card {{
     width: 100%;
-    max-width: 1000px;
+    max-width: 1100px;
 
-    margin-top: 24px;
+    margin-top: 20px;
 
-    padding: 8px;
+    padding: 7px;
 
     border-radius: 22px;
 
     background:
-        linear-gradient(
-            145deg,
-            rgba(255,255,255,0.10),
-            rgba(255,255,255,0.025)
-        );
+        rgba(255,255,255,.06);
 
     border:
         1px solid
-        rgba(255,255,255,0.10);
+        rgba(255,255,255,.09);
 
     box-shadow:
-        0 25px 80px
-        rgba(0,0,0,0.55);
+        0 25px 90px
+        rgba(0,0,0,.6);
 
     backdrop-filter:
-        blur(18px);
+        blur(20px);
 }}
 
 .video-container {{
@@ -1265,25 +1632,60 @@ body {{
 
     background: #000;
 
-    border-radius: 16px;
+    border-radius: 17px;
 
     overflow: hidden;
-
-    position: relative;
 }}
 
 video {{
-    display: block;
-
     width: 100%;
 
-    max-height: 75vh;
+    display: block;
 
     background: #000;
 
     object-fit: contain;
 
-    border-radius: 16px;
+    max-height: 78vh;
+}}
+
+.status {{
+    margin-top: 12px;
+
+    font-size: 12px;
+
+    color: #92909d;
+
+    text-align: center;
+}}
+
+.badges {{
+    margin-top: 10px;
+
+    display: flex;
+
+    justify-content: center;
+
+    gap: 7px;
+
+    flex-wrap: wrap;
+}}
+
+.badge {{
+    padding: 6px 10px;
+
+    border-radius: 999px;
+
+    background:
+        rgba(168,85,247,.10);
+
+    border:
+        1px solid
+        rgba(168,85,247,.18);
+
+    color: #c7a7ff;
+
+    font-size: 10px;
 }}
 
 .ad-screen {{
@@ -1298,133 +1700,76 @@ video {{
     align-items: center;
     justify-content: center;
 
-    flex-direction: column;
-
-    padding: 25px;
-
     background:
         radial-gradient(
             circle at top,
-            #241438,
-            #050507 65%
+            #27143c,
+            #050507 70%
         );
 }}
 
 .ad-box {{
-    width: 100%;
+    width: calc(100% - 40px);
+
     max-width: 420px;
 
-    padding: 30px 20px;
-
-    border-radius: 24px;
+    padding: 32px 22px;
 
     text-align: center;
 
+    border-radius: 25px;
+
     background:
-        rgba(255,255,255,0.055);
+        rgba(255,255,255,.055);
 
     border:
         1px solid
-        rgba(255,255,255,0.10);
+        rgba(255,255,255,.10);
 
     box-shadow:
-        0 25px 80px
-        rgba(0,0,0,0.55);
+        0 30px 100px
+        rgba(0,0,0,.65);
 }}
 
 .ad-icon {{
-    font-size: 48px;
-
-    margin-bottom: 15px;
+    font-size: 46px;
+    margin-bottom: 12px;
 }}
 
 .ad-title {{
     font-size: 22px;
-
     font-weight: 800;
-
-    margin-bottom: 8px;
 }}
 
 .ad-status {{
-    color: #a9a6b4;
+    margin-top: 8px;
+
+    color: #aaa6b3;
 
     font-size: 13px;
 
     line-height: 1.5;
 }}
 
-.status {{
-    width: 100%;
-    max-width: 1000px;
-
-    margin-top: 13px;
-
-    padding: 10px;
-
-    color: #9693a2;
-
-    font-size: 12px;
-
-    text-align: center;
-}}
-
-.info-row {{
-    width: 100%;
-    max-width: 1000px;
-
-    display: flex;
-
-    justify-content: center;
-
-    gap: 8px;
-
-    margin-top: 7px;
-
-    flex-wrap: wrap;
-}}
-
-.badge {{
-    padding: 7px 11px;
-
-    border-radius: 999px;
-
-    background:
-        rgba(139,44,255,0.12);
-
-    border:
-        1px solid
-        rgba(139,44,255,0.18);
-
-    color: #bba0ff;
-
-    font-size: 11px;
-}}
-
-.brand {{
+.footer {{
     margin-top: auto;
 
     padding-top: 30px;
 
-    color: #5f5d69;
+    color: #55515d;
 
-    font-size: 11px;
+    font-size: 10px;
 
-    letter-spacing: 0.5px;
-
-    text-align: center;
+    letter-spacing: .6px;
 }}
 
 </style>
 
 </head>
 
-
 <body>
 
-
 <div class="container">
-
 
     <div class="header">
 
@@ -1457,12 +1802,9 @@ video {{
             >
 
                 <source
-                    src="{video_url}"
+                    src="{stream_url}"
                     type="{mime_type}"
                 >
-
-                Your browser does not support
-                HTML5 video.
 
             </video>
 
@@ -1479,7 +1821,7 @@ video {{
     </div>
 
 
-    <div class="info-row">
+    <div class="badges">
 
         <div class="badge">
             HD+
@@ -1500,10 +1842,9 @@ video {{
     </div>
 
 
-    <div class="brand">
-        🌙 NIGHT HUB
+    <div class="footer">
+        NIGHT HUB
     </div>
-
 
 </div>
 
@@ -1539,7 +1880,7 @@ video {{
 
 
 /* =====================================================
-   TELEGRAM WEB APP
+   TELEGRAM
 ===================================================== */
 
 try {{
@@ -1557,10 +1898,7 @@ try {{
 
 }} catch(error) {{
 
-    console.log(
-        "Telegram error:",
-        error
-    );
+    console.log(error);
 
 }}
 
@@ -1596,7 +1934,6 @@ const adStatus =
 
 let adController = null;
 
-
 try {{
 
     if (
@@ -1606,8 +1943,10 @@ try {{
 
         adController =
             window.Adsgram.init({{
+
                 blockId:
                     "{ADSGRAM_BLOCK_ID}"
+
             }});
 
     }}
@@ -1615,7 +1954,7 @@ try {{
 }} catch(error) {{
 
     console.log(
-        "AdsGram init error:",
+        "AdsGram error:",
         error
     );
 
@@ -1651,7 +1990,7 @@ async function showAd() {{
             resolve =>
                 setTimeout(
                     resolve,
-                    400
+                    500
                 )
         );
 
@@ -1663,7 +2002,7 @@ async function showAd() {{
     }} catch(error) {{
 
         console.log(
-            "AdsGram error:",
+            "AdsGram show error:",
             error
         );
 
@@ -1689,18 +2028,15 @@ async function showAd() {{
 
 
 /* =====================================================
-   START VIDEO
+   START
 ===================================================== */
 
 let started = false;
 
-
 async function startVideo() {{
 
     if (started) {{
-
         return;
-
     }}
 
     started = true;
@@ -1723,12 +2059,12 @@ async function startVideo() {{
     }} catch(error) {{
 
         console.log(
-            "Autoplay error:",
+            "Autoplay blocked:",
             error
         );
 
         status.textContent =
-            "▶️ Tap the video to play";
+            "▶️ Tap play to start";
 
     }}
 
@@ -1736,7 +2072,7 @@ async function startVideo() {{
 
 
 /* =====================================================
-   USER INTERACTION
+   FIRST USER INTERACTION
 ===================================================== */
 
 document.addEventListener(
@@ -1777,17 +2113,6 @@ video.addEventListener(
 
         status.textContent =
             "✅ Video ready";
-
-    }}
-);
-
-
-video.addEventListener(
-    "canplay",
-    function() {{
-
-        status.textContent =
-            "▶️ Ready";
 
     }}
 );
@@ -1855,15 +2180,18 @@ video.addEventListener(
 
 </script>
 
-
 </body>
 
 </html>
 """
 
+
     return web.Response(
+
         text=html,
-        content_type="text/html",
+
+        content_type="text/html"
+
     )
 
 
@@ -1873,7 +2201,7 @@ video.addEventListener(
 
 def parse_range(
     range_header: str,
-    file_size: int,
+    file_size: int
 ):
 
     if not range_header:
@@ -1909,19 +2237,13 @@ def parse_range(
     if len(parts) != 2:
         return None
 
-    start_text = (
-        parts[0].strip()
-    )
-
-    end_text = (
-        parts[1].strip()
-    )
+    start_text = parts[0].strip()
+    end_text = parts[1].strip()
 
     try:
 
         # -------------------------------------------------
-        # Suffix range
-        # Example: bytes=-500
+        # SUFFIX
         # -------------------------------------------------
 
         if start_text == "":
@@ -1945,8 +2267,7 @@ def parse_range(
             )
 
             end = (
-                file_size
-                - 1
+                file_size - 1
             )
 
         else:
@@ -1964,8 +2285,7 @@ def parse_range(
             if end_text == "":
 
                 end = (
-                    file_size
-                    - 1
+                    file_size - 1
                 )
 
             else:
@@ -1977,14 +2297,16 @@ def parse_range(
                 if end >= file_size:
 
                     end = (
-                        file_size
-                        - 1
+                        file_size - 1
                     )
 
             if end < start:
                 return None
 
-        return start, end
+        return (
+            start,
+            end
+        )
 
     except ValueError:
 
@@ -1999,71 +2321,136 @@ async def stream_video(
     request: web.Request
 ):
 
-    # -----------------------------------------------------
-    # SECURITY
-    # -----------------------------------------------------
-
-    params = get_secure_params(
-        request
+    token = (
+        request.query.get(
+            "t"
+        )
     )
 
-    if not params:
+    if not token:
 
         return web.Response(
-            text="Invalid or expired stream link.",
-            status=403,
+            text="Forbidden",
+            status=403
         )
 
-    file_id = params["file_id"]
-    file_size = params["size"]
-    mime_type = params["mime"]
-    file_name = params["name"]
+
+    video_index = verify_watch_token(
+        token
+    )
+
+
+    if video_index is None:
+
+        return web.Response(
+            text="Invalid watch token",
+            status=403
+        )
+
+
+    data = videos[
+        video_index
+    ]
+
+
+    file_id = data.get(
+        "file_id"
+    )
+
+
+    file_size = int(
+        data.get(
+            "file_size",
+            0
+        )
+    )
+
+
+    mime_type = data.get(
+        "mime_type",
+        "video/mp4"
+    )
+
+
+    file_name = data.get(
+        "file_name",
+        "video.mp4"
+    )
+
+
+    if not file_id:
+
+        return web.Response(
+            text="Missing file",
+            status=404
+        )
+
 
     if file_size <= 0:
 
         return web.Response(
-            text="Invalid file size.",
-            status=400,
+            text="Invalid file size",
+            status=400
         )
 
-    # -----------------------------------------------------
-    # RANGE
-    # -----------------------------------------------------
 
-    range_header = request.headers.get(
-        "Range"
+    # =====================================================
+    # RANGE
+    # =====================================================
+
+    range_header = (
+        request.headers.get(
+            "Range"
+        )
     )
+
 
     requested_range = parse_range(
         range_header,
-        file_size,
+        file_size
     )
 
-    # -----------------------------------------------------
+
+    # =====================================================
     # HEAD
-    # -----------------------------------------------------
+    # =====================================================
 
     if request.method == "HEAD":
 
         headers = {
-            "Content-Type": mime_type,
-            "Content-Length": str(file_size),
-            "Accept-Ranges": "bytes",
-            "Content-Disposition": (
-                f'inline; filename="{file_name}"'
-            ),
-            "Cache-Control": "no-cache",
-            "X-Content-Type-Options": "nosniff",
+
+            "Content-Type":
+                mime_type,
+
+            "Content-Length":
+                str(file_size),
+
+            "Accept-Ranges":
+                "bytes",
+
+            "Content-Disposition":
+                (
+                    f'inline; '
+                    f'filename="{file_name}"'
+                ),
+
+            "Cache-Control":
+                "no-cache",
+
+            "X-Content-Type-Options":
+                "nosniff",
+
         }
 
         return web.Response(
             status=200,
-            headers=headers,
+            headers=headers
         )
 
-    # -----------------------------------------------------
-    # RANGE
-    # -----------------------------------------------------
+
+    # =====================================================
+    # RANGE RESPONSE
+    # =====================================================
 
     if requested_range:
 
@@ -2091,9 +2478,10 @@ async def stream_video(
 
         status_code = 200
 
-    # -----------------------------------------------------
-    # RESPONSE HEADERS
-    # -----------------------------------------------------
+
+    # =====================================================
+    # HEADERS
+    # =====================================================
 
     headers = {
 
@@ -2130,149 +2518,169 @@ async def stream_video(
                 "Content-Range, "
                 "Accept-Ranges"
             ),
+
     }
+
 
     if status_code == 206:
 
-        headers["Content-Range"] = (
+        headers[
+            "Content-Range"
+        ] = (
+
             f"bytes "
             f"{start_byte}-"
             f"{end_byte}/"
             f"{file_size}"
+
         )
 
-    # -----------------------------------------------------
-    # STREAM RESPONSE
-    # -----------------------------------------------------
 
     response = web.StreamResponse(
+
         status=status_code,
-        headers=headers,
+
+        headers=headers
+
     )
+
 
     await response.prepare(
         request
     )
 
-    # -----------------------------------------------------
+
+    # =====================================================
     # PYROGRAM OFFSET
-    # -----------------------------------------------------
+    # =====================================================
 
     first_chunk = (
         start_byte
         // CHUNK_SIZE
     )
 
+
     inner_offset = (
         start_byte
         % CHUNK_SIZE
     )
 
+
     bytes_remaining = (
         content_length
     )
 
+
     chunks_needed = (
+
         (
             inner_offset
             + content_length
             + CHUNK_SIZE
             - 1
         )
+
         // CHUNK_SIZE
+
     )
+
 
     if chunks_needed <= 0:
+
         chunks_needed = 1
 
-    # -----------------------------------------------------
-    # PROTECT HUGE REQUESTS
-    # -----------------------------------------------------
 
-    max_chunks = (
-        MAX_RANGE_REQUEST
-        // CHUNK_SIZE
-    )
-
-    if chunks_needed > max_chunks:
-
-        chunks_needed = max_chunks
-
-    # -----------------------------------------------------
+    # =====================================================
     # STREAM
-    # -----------------------------------------------------
+    # =====================================================
 
     try:
 
         chunk_number = 0
 
+
         async for chunk in (
+
             mtproto.stream_media(
+
                 file_id,
+
                 offset=first_chunk,
-                limit=chunks_needed,
+
+                limit=chunks_needed
+
             )
+
         ):
 
             if bytes_remaining <= 0:
                 break
 
-            # ---------------------------------------------
-            # Remove bytes before requested start
-            # ---------------------------------------------
+
+            # ------------------------------------------------
+            # REMOVE OFFSET FROM FIRST CHUNK
+            # ------------------------------------------------
 
             if chunk_number == 0:
 
                 if inner_offset:
 
-                    chunk = (
-                        chunk[
-                            inner_offset:
-                        ]
-                    )
+                    chunk = chunk[
+                        inner_offset:
+                    ]
 
-            # ---------------------------------------------
-            # Do not send extra bytes
-            # ---------------------------------------------
+
+            # ------------------------------------------------
+            # NEVER SEND MORE THAN REQUESTED
+            # ------------------------------------------------
 
             if len(chunk) > bytes_remaining:
 
-                chunk = (
-                    chunk[
-                        :bytes_remaining
-                    ]
-                )
+                chunk = chunk[
+                    :bytes_remaining
+                ]
+
 
             if not chunk:
                 break
+
 
             await response.write(
                 chunk
             )
 
+
             bytes_remaining -= (
                 len(chunk)
             )
 
+
             chunk_number += 1
+
 
             if bytes_remaining <= 0:
                 break
+
 
         try:
 
             await response.write_eof()
 
         except Exception:
+
             pass
+
 
         return response
 
+
     except asyncio.CancelledError:
 
-        # Browser cancelled request,
-        # usually because user seeked.
+        # Browser seek/pause/close.
+        # Normal behaviour.
+
         raise
+
 
     except Exception as error:
 
@@ -2292,14 +2700,30 @@ async def stream_video(
             "======================================"
         )
 
+
         try:
 
             await response.write_eof()
 
         except Exception:
+
             pass
 
+
         return response
+
+
+# =========================================================
+# HEALTH
+# =========================================================
+
+async def health(
+    request: web.Request
+):
+
+    return web.Response(
+        text="NIGHT HUB is running ✅"
+    )
 
 
 # =========================================================
@@ -2309,78 +2733,75 @@ async def stream_video(
 async def start_web_server():
 
     app = web.Application(
+
         client_max_size=(
             10
             * 1024
             * 1024
             * 1024
         )
+
     )
 
-    # -----------------------------------------------------
-    # HOME
-    # -----------------------------------------------------
 
+    # HOME
     app.router.add_get(
         "/",
         health
     )
 
-    # -----------------------------------------------------
-    # HEALTH
-    # -----------------------------------------------------
 
+    # HEALTH
     app.router.add_get(
         "/health",
         health
     )
 
-    # -----------------------------------------------------
-    # WATCH
-    # -----------------------------------------------------
 
+    # PLAYER
     app.router.add_get(
         "/watch",
         player
     )
 
-    # -----------------------------------------------------
-    # STREAM GET
-    # -----------------------------------------------------
 
+    # STREAM GET
     app.router.add_route(
         "GET",
         "/stream",
         stream_video
     )
 
-    # -----------------------------------------------------
-    # STREAM HEAD
-    # -----------------------------------------------------
 
+    # STREAM HEAD
     app.router.add_route(
         "HEAD",
         "/stream",
         stream_video
     )
 
-    # -----------------------------------------------------
-    # RUNNER
-    # -----------------------------------------------------
 
     runner = web.AppRunner(
         app
     )
 
+
     await runner.setup()
 
+
     site = web.TCPSite(
+
         runner,
+
         "0.0.0.0",
-        PORT,
+
+        PORT
+
     )
 
+
     await site.start()
+
 
     print(
         "=========================================="
@@ -2399,15 +2820,7 @@ async def start_web_server():
     )
 
     print(
-        "MTProto: ENABLED"
-    )
-
-    print(
-        "Large streaming: ENABLED"
-    )
-
-    print(
-        "Range/Seek: ENABLED"
+        f"VIDEOS IN DATABASE: {len(videos)}"
     )
 
     print(
@@ -2415,7 +2828,7 @@ async def start_web_server():
     )
 
     print(
-        "ADDVIDEO REQUIRED: ENABLED"
+        "VIDEO LIBRARY: ENABLED"
     )
 
     print(
@@ -2427,11 +2840,19 @@ async def start_web_server():
     )
 
     print(
-        "SECURE STREAM URL: ENABLED"
+        "SIGNED WATCH LINKS: ENABLED"
     )
 
     print(
-        f"AdsGram: {ADSGRAM_BLOCK_ID}"
+        "RANGE/SEEK: ENABLED"
+    )
+
+    print(
+        "LARGE FILE STREAMING: ENABLED"
+    )
+
+    print(
+        f"AdsGram Block: {ADSGRAM_BLOCK_ID}"
     )
 
     print(
@@ -2446,24 +2867,28 @@ async def start_web_server():
 async def main():
 
     # -----------------------------------------------------
-    # MTProto
+    # START MTProto
     # -----------------------------------------------------
 
     print(
-        "Starting Telegram MTProto client..."
+        "Starting Telegram MTProto..."
     )
 
+
     await mtproto.start()
+
 
     print(
         "Telegram MTProto started ✅"
     )
 
+
     # -----------------------------------------------------
-    # WEB SERVER
+    # WEB
     # -----------------------------------------------------
 
     await start_web_server()
+
 
     # -----------------------------------------------------
     # BOT
@@ -2472,6 +2897,7 @@ async def main():
     print(
         "Starting NIGHT HUB bot..."
     )
+
 
     try:
 
@@ -2485,18 +2911,22 @@ async def main():
             "Stopping NIGHT HUB..."
         )
 
+
         try:
 
             await bot.session.close()
 
         except Exception:
+
             pass
+
 
         try:
 
             await mtproto.stop()
 
         except Exception:
+
             pass
 
 
