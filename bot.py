@@ -2,7 +2,6 @@ import os
 import asyncio
 import secrets
 import tempfile
-import subprocess
 from urllib.parse import quote
 from pathlib import Path
 
@@ -28,8 +27,8 @@ import imageio_ffmpeg
 
 
 # =========================================================
-#                     NIGHT HUB
-#          CHANNEL + ADMIN BOT + MINI APP
+#                    NIGHT HUB
+#          TELEGRAM VIDEO BOT + MINI APP
 # =========================================================
 
 
@@ -150,7 +149,7 @@ dp = Dispatcher()
 
 
 # =========================================================
-# PYROGRAM
+# PYROGRAM MTProto
 # =========================================================
 
 mtproto = Client(
@@ -261,10 +260,15 @@ def watch_keyboard(
 ):
 
     watch_url = make_watch_url(
+
         file_id=file_id,
+
         size_bytes=size_bytes,
+
         mime_type=mime_type,
+
         file_name=file_name,
+
     )
 
     return InlineKeyboardMarkup(
@@ -305,13 +309,19 @@ def admin_panel_keyboard():
             [
 
                 InlineKeyboardButton(
+
                     text="🎬 ADD VIDEO",
+
                     callback_data="admin_add_video",
+
                 ),
 
                 InlineKeyboardButton(
+
                     text="📚 VIDEOS",
+
                     callback_data="admin_videos",
+
                 ),
 
             ],
@@ -319,13 +329,19 @@ def admin_panel_keyboard():
             [
 
                 InlineKeyboardButton(
+
                     text="📢 CHANNEL",
+
                     callback_data="admin_channel",
+
                 ),
 
                 InlineKeyboardButton(
+
                     text="👥 USERS",
+
                     callback_data="admin_users",
+
                 ),
 
             ],
@@ -333,8 +349,11 @@ def admin_panel_keyboard():
             [
 
                 InlineKeyboardButton(
+
                     text="🔄 REFRESH",
+
                     callback_data="admin_refresh",
+
                 ),
 
             ],
@@ -342,8 +361,11 @@ def admin_panel_keyboard():
             [
 
                 InlineKeyboardButton(
+
                     text="❌ CLOSE",
+
                     callback_data="admin_close",
+
                 ),
 
             ],
@@ -379,26 +401,13 @@ def admin_panel_text():
 
 
 # =========================================================
-# EXTRACT COVER FROM VIDEO
+# EXTRACT COVER
 # =========================================================
 
 async def extract_video_cover(
     video_path: str,
     output_path: str,
 ):
-
-    """
-    Video ke andar se frame extract karta hai.
-
-    First attempt:
-        2 seconds
-
-    Agar video chhoti ho:
-        first frame
-
-    Output:
-        JPG cover
-    """
 
     commands = [
 
@@ -449,17 +458,21 @@ async def extract_video_cover(
 
         try:
 
-            process = await asyncio.create_subprocess_exec(
+            process = (
+                await asyncio.create_subprocess_exec(
 
-                *command,
+                    *command,
 
-                stdout=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
 
-                stderr=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
 
+                )
             )
 
-            stdout, stderr = await process.communicate()
+            stdout, stderr = (
+                await process.communicate()
+            )
 
             if (
 
@@ -494,7 +507,7 @@ async def extract_video_cover(
 
 
 # =========================================================
-# DOWNLOAD VIDEO TEMPORARILY
+# DOWNLOAD VIDEO USING PYROGRAM
 # =========================================================
 
 async def download_video_temp(
@@ -519,38 +532,107 @@ async def download_video_temp(
 
     try:
 
-        await bot.download(
-            file_id,
-            destination=video_path,
+        print(
+            "Getting Telegram message through MTProto..."
         )
 
-        if not os.path.exists(video_path):
+        pyro_message = await mtproto.get_messages(
+
+            chat_id=message.chat.id,
+
+            message_ids=message.message_id,
+
+        )
+
+        if not pyro_message:
 
             raise RuntimeError(
-                "Video download failed"
+                "Pyrogram could not find the uploaded message."
             )
 
-        return temp_dir, video_path
+        if not (
+            pyro_message.video
+            or pyro_message.document
+        ):
 
-    except Exception:
+            raise RuntimeError(
+                "Video media was not found."
+            )
 
-        try:
+        print(
+            "Downloading video using Pyrogram MTProto..."
+        )
 
-            if os.path.exists(video_path):
+        downloaded_path = (
+            await mtproto.download_media(
 
-                os.remove(video_path)
+                pyro_message,
 
-            os.rmdir(temp_dir)
+                file_name=video_path,
 
-        except Exception:
+            )
+        )
 
-            pass
+        if not downloaded_path:
+
+            raise RuntimeError(
+                "Pyrogram download failed."
+            )
+
+        if not os.path.exists(
+            downloaded_path
+        ):
+
+            raise RuntimeError(
+                "Downloaded file does not exist."
+            )
+
+        downloaded_size = os.path.getsize(
+            downloaded_path
+        )
+
+        print(
+            "=========================================="
+        )
+
+        print(
+            "VIDEO DOWNLOAD SUCCESS"
+        )
+
+        print(
+            f"File: {downloaded_path}"
+        )
+
+        print(
+            f"Size: "
+            f"{downloaded_size / (1024 * 1024):.2f} MB"
+        )
+
+        print(
+            "=========================================="
+        )
+
+        return (
+            temp_dir,
+            downloaded_path
+        )
+
+    except Exception as error:
+
+        print(
+            "PYROGRAM DOWNLOAD ERROR:",
+            repr(error)
+        )
+
+        cleanup_temp_dir(
+            temp_dir
+        )
 
         raise
 
 
 # =========================================================
-# DELETE TEMP DIRECTORY
+# CLEANUP TEMP DIRECTORY
 # =========================================================
 
 def cleanup_temp_dir(
@@ -559,11 +641,15 @@ def cleanup_temp_dir(
 
     try:
 
-        if not os.path.isdir(temp_dir):
+        if not os.path.isdir(
+            temp_dir
+        ):
 
             return
 
-        for item in os.listdir(temp_dir):
+        for item in os.listdir(
+            temp_dir
+        ):
 
             path = os.path.join(
                 temp_dir,
@@ -594,7 +680,7 @@ def cleanup_temp_dir(
 
 
 # =========================================================
-# PUBLISH VIDEO
+# PUBLISH VIDEO TO CHANNEL
 # =========================================================
 
 async def publish_video_to_channel(
@@ -621,6 +707,11 @@ async def publish_video_to_channel(
 
     )
 
+    # =====================================================
+    # IMPORTANT:
+    # WATCH NOW BUTTON
+    # =====================================================
+
     keyboard = watch_keyboard(
 
         file_id=file_id,
@@ -634,16 +725,22 @@ async def publish_video_to_channel(
     )
 
     # =====================================================
-    # SEND VIDEO
+    # BOT API PUBLISH
     # =====================================================
 
     try:
+
+        print(
+            "Publishing video to channel using Bot API..."
+        )
 
         if (
 
             cover_path
 
-            and os.path.exists(cover_path)
+            and os.path.exists(
+                cover_path
+            )
 
         ):
 
@@ -665,6 +762,9 @@ async def publish_video_to_channel(
 
                 protect_content=True,
 
+                # IMPORTANT
+                reply_markup=keyboard,
+
             )
 
         else:
@@ -683,24 +783,44 @@ async def publish_video_to_channel(
 
                 protect_content=True,
 
+                # IMPORTANT
+                reply_markup=keyboard,
+
             )
+
+        print(
+            "Channel publish successful ✅"
+        )
+
+        return sent
 
     except Exception as error:
 
         print(
-            "Bot API channel publish failed:",
+            "Bot API channel publish failed:"
+        )
+
+        print(
             repr(error)
         )
 
-        # -------------------------------------------------
-        # PYROGRAM FALLBACK
-        # -------------------------------------------------
+        print(
+            "Trying Pyrogram fallback..."
+        )
+
+    # =====================================================
+    # PYROGRAM FALLBACK
+    # =====================================================
+
+    try:
 
         if (
 
             cover_path
 
-            and os.path.exists(cover_path)
+            and os.path.exists(
+                cover_path
+            )
 
         ):
 
@@ -718,6 +838,8 @@ async def publish_video_to_channel(
 
                 supports_streaming=True,
 
+                reply_markup=keyboard,
+
             )
 
         else:
@@ -734,9 +856,26 @@ async def publish_video_to_channel(
 
                 supports_streaming=True,
 
+                reply_markup=keyboard,
+
             )
 
-    return sent
+        print(
+            "Pyrogram channel publish successful ✅"
+        )
+
+        return sent
+
+    except Exception as error:
+
+        print(
+            "PYROGRAM CHANNEL PUBLISH ERROR:",
+            repr(error)
+        )
+
+        raise RuntimeError(
+            f"Channel publish failed: {error}"
+        )
 
 
 # =========================================================
@@ -830,7 +969,13 @@ async def process_one_video(
     if file_size > MAX_FILE_SIZE:
 
         await message.answer(
-            "❌ Video 2 GB se badi hai."
+
+            "❌ <b>VIDEO TOO LARGE</b>\n\n"
+
+            "Maximum supported size is 2 GB.",
+
+            parse_mode="HTML"
+
         )
 
         return
@@ -840,6 +985,10 @@ async def process_one_video(
     # =====================================================
 
     if file_id in processing_videos:
+
+        await message.answer(
+            "⏳ Ye video already processing mein hai."
+        )
 
         return
 
@@ -853,9 +1002,9 @@ async def process_one_video(
 
     try:
 
-        # -------------------------------------------------
+        # =================================================
         # STATUS
-        # -------------------------------------------------
+        # =================================================
 
         status_message = await message.answer(
 
@@ -866,18 +1015,17 @@ async def process_one_video(
             f"📦 "
             f"{file_size / (1024 * 1024):.2f} MB\n\n"
 
-            "🖼️ Video se automatic cover nikali ja rahi hai...\n\n"
+            "📥 MTProto se video download ho rahi hai...\n\n"
 
-            "⏳ Please wait..."
+            "⏳ Please wait...",
 
-            ,
             parse_mode="HTML"
 
         )
 
-        # -------------------------------------------------
-        # TEMP DOWNLOAD
-        # -------------------------------------------------
+        # =================================================
+        # DOWNLOAD USING PYROGRAM
+        # =================================================
 
         temp_dir, video_path = (
             await download_video_temp(
@@ -891,9 +1039,9 @@ async def process_one_video(
             )
         )
 
-        # -------------------------------------------------
-        # COVER PATH
-        # -------------------------------------------------
+        # =================================================
+        # COVER
+        # =================================================
 
         cover_path = os.path.join(
 
@@ -903,9 +1051,21 @@ async def process_one_video(
 
         )
 
-        # -------------------------------------------------
+        # =================================================
         # EXTRACT COVER
-        # -------------------------------------------------
+        # =================================================
+
+        await status_message.edit_text(
+
+            "🖼️ <b>CREATING COVER</b>\n\n"
+
+            "Video se automatic cover nikali ja rahi hai...\n\n"
+
+            "⏳ Please wait...",
+
+            parse_mode="HTML"
+
+        )
 
         cover_ok = await extract_video_cover(
 
@@ -919,7 +1079,7 @@ async def process_one_video(
 
             await status_message.edit_text(
 
-                "🖼️ <b>COVER READY</b>\n\n"
+                "🖼️ <b>COVER READY ✅</b>\n\n"
 
                 "📢 Video channel mein publish ho rahi hai...\n\n"
 
@@ -935,17 +1095,19 @@ async def process_one_video(
 
             await status_message.edit_text(
 
-                "⚠️ <b>Cover extract nahi ho saki.</b>\n\n"
+                "⚠️ <b>COVER EXTRACT NAHI HO SAKI</b>\n\n"
 
-                "📢 Video channel mein publish ho rahi hai...",
+                "📢 Video channel mein publish ho rahi hai...\n\n"
+
+                "⏳ Please wait...",
 
                 parse_mode="HTML"
 
             )
 
-        # -------------------------------------------------
+        # =================================================
         # PUBLISH
-        # -------------------------------------------------
+        # =================================================
 
         channel_message = (
 
@@ -965,9 +1127,9 @@ async def process_one_video(
 
         )
 
-        # -------------------------------------------------
-        # SAVE LIBRARY
-        # -------------------------------------------------
+        # =================================================
+        # CHANNEL MESSAGE ID
+        # =================================================
 
         channel_message_id = getattr(
 
@@ -991,6 +1153,10 @@ async def process_one_video(
 
             )
 
+        # =================================================
+        # SAVE LIBRARY
+        # =================================================
+
         video_library[channel_message_id] = {
 
             "file_id": file_id,
@@ -1005,9 +1171,9 @@ async def process_one_video(
 
         }
 
-        # -------------------------------------------------
-        # SUCCESS
-        # -------------------------------------------------
+        # =================================================
+        # WATCH BUTTON
+        # =================================================
 
         keyboard = watch_keyboard(
 
@@ -1021,7 +1187,19 @@ async def process_one_video(
 
         )
 
-        if cover_path and os.path.exists(cover_path):
+        # =================================================
+        # SUCCESS MESSAGE
+        # =================================================
+
+        if (
+
+            cover_path
+
+            and os.path.exists(
+                cover_path
+            )
+
+        ):
 
             try:
 
@@ -1055,17 +1233,23 @@ async def process_one_video(
 
                 )
 
-            except Exception:
+            except Exception as error:
+
+                print(
+                    "SUCCESS PHOTO ERROR:",
+                    repr(error)
+                )
 
                 await message.answer(
 
                     "✅ <b>VIDEO PUBLISHED</b>\n\n"
 
-                    f"🎬 {file_name}\n\n"
+                    f"🎬 <b>{file_name}</b>\n\n"
 
                     "🖼️ Cover: ✅\n"
                     "📢 Channel: ✅\n"
-                    "👉 WATCH NOW: ✅",
+                    "👉 WATCH NOW: ✅\n"
+                    "🎥 Mini App: ✅",
 
                     reply_markup=keyboard,
 
@@ -1085,7 +1269,8 @@ async def process_one_video(
 
                 "🖼️ Cover: ⚠️\n"
                 "📢 Channel: ✅\n"
-                "👉 WATCH NOW: ✅",
+                "👉 WATCH NOW: ✅\n"
+                "🎥 Mini App: ✅",
 
                 reply_markup=keyboard,
 
@@ -1094,6 +1279,10 @@ async def process_one_video(
                 protect_content=True,
 
             )
+
+        # =================================================
+        # DELETE STATUS
+        # =================================================
 
         try:
 
@@ -1106,8 +1295,19 @@ async def process_one_video(
     except Exception as error:
 
         print(
-            "VIDEO PROCESS ERROR:",
+            "=========================================="
+        )
+
+        print(
+            "VIDEO PROCESS ERROR:"
+        )
+
+        print(
             repr(error)
+        )
+
+        print(
+            "=========================================="
         )
 
         try:
@@ -1140,7 +1340,9 @@ async def process_one_video(
 
     finally:
 
-        processing_videos.discard(file_id)
+        processing_videos.discard(
+            file_id
+        )
 
         if temp_dir:
 
@@ -1159,10 +1361,6 @@ async def start(
 ):
 
     user_id = message.from_user.id
-
-    # =====================================================
-    # ADMIN
-    # =====================================================
 
     if is_admin(user_id):
 
@@ -1189,10 +1387,6 @@ async def start(
 
         return
 
-    # =====================================================
-    # PUBLIC
-    # =====================================================
-
     await send_public_video_library(
         message
     )
@@ -1209,10 +1403,6 @@ async def send_public_video_library(
     try:
 
         found_videos = []
-
-        # -------------------------------------------------
-        # READ CHANNEL
-        # -------------------------------------------------
 
         async for channel_message in (
             mtproto.get_chat_history(
@@ -1304,10 +1494,6 @@ async def send_public_video_library(
 
             })
 
-        # -------------------------------------------------
-        # NO VIDEOS
-        # -------------------------------------------------
-
         if not found_videos:
 
             await message.answer(
@@ -1327,10 +1513,6 @@ async def send_public_video_library(
 
             return
 
-        # -------------------------------------------------
-        # HEADER
-        # -------------------------------------------------
-
         await message.answer(
 
             "🌙 <b>NIGHT HUB</b>\n\n"
@@ -1343,13 +1525,12 @@ async def send_public_video_library(
 
         )
 
-        # -------------------------------------------------
-        # CARDS
-        # -------------------------------------------------
-
         for index, item in enumerate(
+
             found_videos,
+
             start=1
+
         ):
 
             keyboard = watch_keyboard(
@@ -1410,7 +1591,7 @@ async def send_public_video_library(
 
 
 # =========================================================
-# ADMIN HELP
+# HELP
 # =========================================================
 
 @dp.message(Command("help"))
@@ -1459,6 +1640,7 @@ async def admin_cmd(
         await message.answer(
 
             "🔒 <b>ACCESS DENIED</b>\n\n"
+
             "Aapko Admin Panel ka access nahi hai.",
 
             parse_mode="HTML"
@@ -1479,7 +1661,7 @@ async def admin_cmd(
 
 
 # =========================================================
-# ADD VIDEO COMMAND
+# ADD VIDEO
 # =========================================================
 
 @dp.message(Command("addvideo"))
@@ -1494,6 +1676,7 @@ async def add_video_cmd(
         await message.answer(
 
             "🔒 <b>UPLOAD DISABLED</b>\n\n"
+
             "Sirf Admin video upload kar sakta hai.",
 
             parse_mode="HTML"
@@ -1514,7 +1697,7 @@ async def add_video_cmd(
         "📢 Uske baad video private channel "
         "mein publish hogi.\n\n"
 
-        "📦 Aap multiple videos bhi ek saath bhej sakte ho.\n\n"
+        "📦 Aap multiple videos bhi bhej sakte ho.\n\n"
 
         "❌ Upload rokne ki zarurat nahi hai.",
 
@@ -1558,10 +1741,6 @@ async def video_received(
 
     user_id = message.from_user.id
 
-    # -----------------------------------------------------
-    # PUBLIC USER
-    # -----------------------------------------------------
-
     if not is_admin(user_id):
 
         await message.answer(
@@ -1577,10 +1756,6 @@ async def video_received(
         )
 
         return
-
-    # -----------------------------------------------------
-    # ADMIN
-    # -----------------------------------------------------
 
     await process_one_video(
         message
@@ -1644,7 +1819,7 @@ async def document_received(
 
 
 # =========================================================
-# ADMIN CALLBACK: ADD VIDEO
+# ADMIN ADD VIDEO CALLBACK
 # =========================================================
 
 @dp.callback_query(
@@ -1686,7 +1861,7 @@ async def admin_add_video_callback(
 
 
 # =========================================================
-# ADMIN CALLBACK: VIDEOS
+# ADMIN VIDEOS CALLBACK
 # =========================================================
 
 @dp.callback_query(
@@ -1787,7 +1962,7 @@ async def admin_videos_callback(
 
 
 # =========================================================
-# ADMIN CALLBACK: CHANNEL
+# ADMIN CHANNEL CALLBACK
 # =========================================================
 
 @dp.callback_query(
@@ -1849,7 +2024,7 @@ async def admin_channel_callback(
 
 
 # =========================================================
-# ADMIN CALLBACK: USERS
+# ADMIN USERS CALLBACK
 # =========================================================
 
 @dp.callback_query(
@@ -2087,7 +2262,6 @@ async def player(
     )
 
     html = f"""
-
 <!DOCTYPE html>
 
 <html>
@@ -2117,15 +2291,10 @@ content="#050507">
 }}
 
 html, body {{
-
     margin: 0;
-
     padding: 0;
-
     width: 100%;
-
     min-height: 100%;
-
     background:
         radial-gradient(
             circle at 20% 0%,
@@ -2133,247 +2302,153 @@ html, body {{
             #0b0911 35%,
             #030305 100%
         );
-
     color: white;
-
     font-family:
         -apple-system,
         BlinkMacSystemFont,
         "Segoe UI",
         Arial,
         sans-serif;
-
 }}
 
 .container {{
-
     min-height: 100vh;
-
     display: flex;
-
     flex-direction: column;
-
     align-items: center;
-
     padding: 20px 12px 30px;
-
 }}
 
 .logo {{
-
     width: 70px;
-
     height: 70px;
-
     border-radius: 22px;
-
     display: flex;
-
     align-items: center;
-
     justify-content: center;
-
     background:
         linear-gradient(
             135deg,
             #9b4dff,
             #4a00ff
         );
-
     font-size: 32px;
-
 }}
 
 .title {{
-
     margin: 12px 0 0;
-
     font-size: 28px;
-
     font-weight: 900;
-
 }}
 
 .subtitle {{
-
     margin-top: 5px;
-
     color: #9997a7;
-
     font-size: 13px;
-
 }}
 
 .player-card {{
-
     width: 100%;
-
     max-width: 1000px;
-
     margin-top: 22px;
-
     padding: 8px;
-
     border-radius: 22px;
-
     background:
         rgba(255,255,255,0.06);
-
     border:
         1px solid
         rgba(255,255,255,0.10);
-
 }}
 
 .video-container {{
-
     width: 100%;
-
     background: black;
-
     border-radius: 16px;
-
     overflow: hidden;
-
 }}
 
 video {{
-
     display: block;
-
     width: 100%;
-
     max-height: 75vh;
-
     background: black;
-
     object-fit: contain;
-
 }}
 
 .status {{
-
     margin-top: 14px;
-
     color: #aaa8b5;
-
     font-size: 13px;
-
     text-align: center;
-
 }}
 
 .badges {{
-
     display: flex;
-
     gap: 8px;
-
     margin-top: 10px;
-
     justify-content: center;
-
     flex-wrap: wrap;
-
 }}
 
 .badge {{
-
     padding: 7px 12px;
-
     border-radius: 999px;
-
     background:
         rgba(139,44,255,0.12);
-
     border:
         1px solid
         rgba(139,44,255,0.18);
-
     color: #c2a7ff;
-
     font-size: 11px;
-
 }}
 
 .ad-screen {{
-
     position: fixed;
-
     inset: 0;
-
     z-index: 9999;
-
     display: none;
-
     align-items: center;
-
     justify-content: center;
-
     flex-direction: column;
-
     padding: 25px;
-
     background:
         radial-gradient(
             circle at top,
             #241438,
             #050507 65%
         );
-
 }}
 
 .ad-box {{
-
     width: 100%;
-
     max-width: 420px;
-
     padding: 30px 20px;
-
     border-radius: 24px;
-
     text-align: center;
-
     background:
         rgba(255,255,255,0.055);
-
 }}
 
 .ad-icon {{
-
     font-size: 48px;
-
 }}
 
 .ad-title {{
-
     font-size: 22px;
-
     font-weight: 800;
-
     margin-top: 10px;
-
 }}
 
 .ad-status {{
-
     margin-top: 10px;
-
     color: #aaa8b5;
-
 }}
 
 .footer {{
-
     margin-top: auto;
-
     padding-top: 30px;
-
     color: #5f5d69;
-
     font-size: 11px;
-
 }}
 
 </style>
@@ -2401,27 +2476,17 @@ Premium Online Video
 <div class="video-container">
 
 <video
-
 id="videoPlayer"
-
 controls
-
 playsinline
-
 webkit-playsinline
-
 preload="metadata"
-
 controlsList="nodownload"
-
 >
 
 <source
-
 src="{video_url}"
-
 type="{mime_type}"
-
 >
 
 Your browser does not support HTML5 video.
@@ -2758,7 +2823,6 @@ video.addEventListener(
 </body>
 
 </html>
-
 """
 
     return web.Response(
@@ -2930,8 +2994,11 @@ async def stream_video(
     )
 
     requested_range = parse_range(
+
         range_header,
+
         file_size
+
     )
 
     if request.method == "HEAD":
@@ -2956,8 +3023,11 @@ async def stream_video(
         }
 
         return web.Response(
+
             status=200,
+
             headers=headers
+
         )
 
     if requested_range:
@@ -3238,11 +3308,11 @@ async def start_web_server():
     )
 
     print(
-        "MULTIPLE VIDEO PROCESSING: ENABLED"
+        "PYROGRAM MTProto DOWNLOAD: ENABLED"
     )
 
     print(
-        "CHANNEL SYSTEM: ENABLED"
+        "CHANNEL WATCH BUTTON: ENABLED"
     )
 
     print(
@@ -3281,7 +3351,7 @@ async def setup_commands():
     )
 
     # -----------------------------------------------------
-    # ADMIN ONLY
+    # ADMIN
     # -----------------------------------------------------
 
     await bot.set_my_commands(
@@ -3346,6 +3416,10 @@ async def setup_commands():
 async def main():
 
     print(
+        "=========================================="
+    )
+
+    print(
         "Starting Telegram MTProto..."
     )
 
@@ -3365,6 +3439,10 @@ async def main():
 
     print(
         "Starting NIGHT HUB bot..."
+    )
+
+    print(
+        "=========================================="
     )
 
     try:
