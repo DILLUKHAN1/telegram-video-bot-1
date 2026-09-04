@@ -1,32 +1,39 @@
 import os
 import asyncio
-import json
-import shutil
-import tempfile
-import secrets
-from pathlib import Path
-
+import logging
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command, CommandStart
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message,
-    CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    CallbackQuery,
 )
-
-from pyrogram import Client, filters
-from pyrogram.types import Message as PyroMessage
-
-import imageio_ffmpeg
+from aiogram.filters import CommandStart, Command
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 
 # ============================================================
 # NIGHT HUB
-# 2 GB USER SESSION ARCHITECTURE
+# Telegram Video Bot
+# Bot API Based
+# SESSION_STRING NOT REQUIRED
 # ============================================================
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+logger = logging.getLogger("NIGHT_HUB")
 
 
 # ============================================================
@@ -34,146 +41,56 @@ import imageio_ffmpeg
 # ============================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-
-API_ID = os.getenv("API_ID", "").strip()
-
-API_HASH = os.getenv("API_HASH", "").strip()
-
-ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
-
-CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-
-SESSION_STRING = os.getenv("SESSION_STRING", "").strip()
+ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
+CHANNEL_ID_RAW = os.getenv("CHANNEL_ID", "").strip()
 
 WEB_URL = os.getenv("WEB_URL", "").strip()
+WATCH_SECRET = os.getenv("WATCH_SECRET", "").strip()
 
-WATCH_SECRET = os.getenv(
-    "WATCH_SECRET",
-    secrets.token_urlsafe(32)
-).strip()
+PORT_RAW = os.getenv("PORT", "8080").strip()
 
-PORT = int(
-    os.getenv(
-        "PORT",
-        "8080"
+
+# ============================================================
+# REQUIRED VARIABLES
+# ============================================================
+
+missing = []
+
+if not BOT_TOKEN:
+    missing.append("BOT_TOKEN")
+
+if not ADMIN_ID_RAW:
+    missing.append("ADMIN_ID")
+
+if not CHANNEL_ID_RAW:
+    missing.append("CHANNEL_ID")
+
+if missing:
+    raise RuntimeError(
+        "Missing environment variable(s): " + ", ".join(missing)
     )
-)
 
 
 # ============================================================
-# VALIDATION
+# CONVERT VALUES
 # ============================================================
 
-required = {
-    "BOT_TOKEN": BOT_TOKEN,
-    "API_ID": API_ID,
-    "API_HASH": API_HASH,
-    "ADMIN_ID": ADMIN_ID,
-    "CHANNEL_ID": CHANNEL_ID,
-    "SESSION_STRING": SESSION_STRING,
-}
-
-
-for name, value in required.items():
-
-    if not value:
-
-        raise RuntimeError(
-            f"Missing environment variable: {name}"
-        )
+try:
+    ADMIN_ID = int(ADMIN_ID_RAW)
+except ValueError:
+    raise RuntimeError("ADMIN_ID must be a number")
 
 
 try:
-
-    API_ID = int(API_ID)
-
-    ADMIN_ID = int(ADMIN_ID)
-
-    CHANNEL_ID = int(CHANNEL_ID)
-
+    CHANNEL_ID = int(CHANNEL_ID_RAW)
 except ValueError:
-
-    raise RuntimeError(
-        "API_ID, ADMIN_ID and CHANNEL_ID must be numbers."
-    )
+    raise RuntimeError("CHANNEL_ID must be a number")
 
 
-# ============================================================
-# WEB URL
-# ============================================================
-
-if not WEB_URL:
-
-    railway_domain = os.getenv(
-        "RAILWAY_PUBLIC_DOMAIN",
-        ""
-    ).strip()
-
-    if railway_domain:
-
-        WEB_URL = (
-            f"https://{railway_domain}"
-        )
-
-    else:
-
-        WEB_URL = (
-            f"http://localhost:{PORT}"
-        )
-
-
-WEB_URL = WEB_URL.rstrip("/")
-
-
-# ============================================================
-# DIRECTORIES
-# ============================================================
-
-BASE_DIR = Path(
-    os.getenv(
-        "DATA_DIR",
-        "/tmp/night_hub"
-    )
-)
-
-BASE_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-
-LIBRARY_FILE = (
-    BASE_DIR /
-    "library.json"
-)
-
-
-# ============================================================
-# VIDEO EXTENSIONS
-# ============================================================
-
-VIDEO_EXTENSIONS = {
-
-    ".mp4",
-    ".mkv",
-    ".webm",
-    ".mov",
-    ".m4v",
-    ".avi",
-    ".mpeg",
-    ".mpg",
-    ".3gp",
-    ".ts",
-    ".flv",
-    ".wmv",
-}
-
-
-# ============================================================
-# FFMPEG
-# ============================================================
-
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+try:
+    PORT = int(PORT_RAW)
+except ValueError:
+    PORT = 8080
 
 
 # ============================================================
@@ -181,1359 +98,651 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 # ============================================================
 
 bot = Bot(
-    token=BOT_TOKEN
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(
+        parse_mode=ParseMode.HTML
+    )
 )
 
 dp = Dispatcher()
 
 
 # ============================================================
-# PYROGRAM USER SESSION
-#
-# IMPORTANT:
-# NO bot_token here.
-#
-# This is a REAL Telegram USER SESSION.
+# MEMORY
 # ============================================================
 
-user_client = Client(
-    name="night_hub_user",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=SESSION_STRING,
-    workdir=str(BASE_DIR),
-)
+# Temporary state for admin
+admin_state = {}
+
+# Stored video messages
+videos = {}
+
+# Simple counter
+video_counter = 0
 
 
 # ============================================================
-# LIBRARY
+# HELPERS
 # ============================================================
 
-def load_library():
+def is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_ID
 
-    if not LIBRARY_FILE.exists():
 
-        return {}
-
-    try:
-
-        with open(
-            LIBRARY_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            data = json.load(f)
-
-        if isinstance(data, dict):
-
-            return data
-
-    except Exception as e:
-
-        print(
-            "LIBRARY LOAD ERROR:",
-            repr(e)
+def get_start_text():
+    if not videos:
+        return (
+            "🎬 <b>WELCOME TO NIGHT HUB</b>\n\n"
+            "Abhi koi video available nahi hai.\n\n"
+            "New videos upload hone ke baad yahan available hongi."
         )
-
-    return {}
-
-
-library = load_library()
-
-
-def save_library():
-
-    temporary = (
-        LIBRARY_FILE.with_suffix(".tmp")
-    )
-
-    with open(
-        temporary,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            library,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
-
-    os.replace(
-        temporary,
-        LIBRARY_FILE
-    )
-
-
-# ============================================================
-# PROCESSING STATE
-# ============================================================
-
-processing = False
-
-current_video_name = ""
-
-
-# ============================================================
-# ADMIN CHECK
-# ============================================================
-
-def is_admin(user_id):
 
     return (
-        int(user_id) == ADMIN_ID
+        "🎬 <b>WELCOME TO NIGHT HUB</b>\n\n"
+        f"📺 Available Videos: <b>{len(videos)}</b>\n\n"
+        "Neeche video select karein."
     )
 
 
-# ============================================================
-# ADMIN KEYBOARD
-# ============================================================
+def video_keyboard():
+    rows = []
+
+    for vid, data in videos.items():
+        title = data.get("title", f"Video {vid}")
+
+        if len(title) > 30:
+            title = title[:27] + "..."
+
+        rows.append([
+            InlineKeyboardButton(
+                text=f"🎬 {title}",
+                callback_data=f"watch:{vid}"
+            )
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def admin_keyboard():
-
     return InlineKeyboardMarkup(
-
         inline_keyboard=[
-
             [
-
                 InlineKeyboardButton(
-                    text="🎬 ADD VIDEO",
-                    callback_data="add_video"
-                ),
-
-                InlineKeyboardButton(
-                    text="📚 VIDEOS",
-                    callback_data="videos"
-                ),
+                    text="📤 ADD VIDEO",
+                    callback_data="admin_add"
+                )
             ],
-
             [
-
                 InlineKeyboardButton(
-                    text="📢 CHANNEL",
-                    callback_data="channel"
-                ),
-
-                InlineKeyboardButton(
-                    text="📊 STATUS",
-                    callback_data="status"
-                ),
+                    text="📋 VIDEO LIST",
+                    callback_data="admin_list"
+                )
             ],
-
             [
-
                 InlineKeyboardButton(
-                    text="🔄 REFRESH",
-                    callback_data="refresh"
-                ),
-
+                    text="🗑 DELETE VIDEO",
+                    callback_data="admin_delete"
+                )
+            ],
+            [
                 InlineKeyboardButton(
-                    text="❌ CLOSE",
-                    callback_data="close"
-                ),
+                    text="📊 STATISTICS",
+                    callback_data="admin_stats"
+                )
             ]
-
         ]
     )
 
 
+def delete_keyboard():
+    rows = []
+
+    for vid, data in videos.items():
+        title = data.get("title", f"Video {vid}")
+
+        if len(title) > 25:
+            title = title[:22] + "..."
+
+        rows.append([
+            InlineKeyboardButton(
+                text=f"❌ {title}",
+                callback_data=f"delete:{vid}"
+            )
+        ])
+
+    if not rows:
+        rows.append([
+            InlineKeyboardButton(
+                text="No videos",
+                callback_data="nothing"
+            )
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ============================================================
-# ADMIN TEXT
-# ============================================================
-
-def admin_text():
-
-    return (
-
-        "👑 <b>NIGHT HUB ADMIN PANEL</b>\n\n"
-
-        "━━━━━━━━━━━━━━━━━━━━\n"
-
-        "🎬 Video Management\n"
-        "🖼️ Automatic Cover\n"
-        "📢 Channel Publishing\n"
-        "📦 2 GB Architecture\n"
-        "🚀 User Session\n"
-
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-        "👇 Select an option:"
-    )
-
-
-# ============================================================
-# /START
+# START
 # ============================================================
 
 @dp.message(CommandStart())
-async def start_handler(
-    message: Message
-):
+async def start_handler(message: Message):
 
-    if is_admin(
-        message.from_user.id
-    ):
-
+    try:
         await message.answer(
-
-            "🌙 <b>NIGHT HUB</b>\n\n"
-
-            "👑 Welcome Admin.\n\n"
-
-            "🎬 Video system: ✅\n"
-            "🖼️ Automatic cover: ✅\n"
-            "📢 Channel upload: ✅\n"
-            "📦 2 GB architecture: ✅\n\n"
-
-            "Use <b>/admin</b>.",
-
-            parse_mode="HTML"
+            get_start_text(),
+            reply_markup=video_keyboard() if videos else None
         )
 
-        return
-
-
-    await message.answer(
-
-        "🌙 <b>WELCOME TO NIGHT HUB</b>\n\n"
-
-        "🎬 Premium Video Library\n\n"
-
-        "Use /videos to view available videos.",
-
-        parse_mode="HTML"
-    )
+    except Exception as e:
+        logger.exception("Start error: %s", e)
 
 
 # ============================================================
-# /ADMIN
+# ADMIN COMMAND
 # ============================================================
 
 @dp.message(Command("admin"))
-async def admin_handler(
-    message: Message
-):
+async def admin_handler(message: Message):
 
-    if not is_admin(
-        message.from_user.id
-    ):
-
+    if not is_admin(message.from_user.id):
         await message.answer(
-            "🔒 Access denied."
+            "❌ <b>Access Denied</b>\n\n"
+            "Aap admin nahi hain."
         )
-
         return
 
-
     await message.answer(
-
-        admin_text(),
-
-        reply_markup=admin_keyboard(),
-
-        parse_mode="HTML"
+        "👑 <b>NIGHT HUB ADMIN PANEL</b>\n\n"
+        "Control Panel:",
+        reply_markup=admin_keyboard()
     )
 
 
 # ============================================================
-# /ADDVIDEO
+# ADMIN PANEL CALLBACK
 # ============================================================
 
-@dp.message(Command("addvideo"))
-async def add_video_handler(
-    message: Message
-):
+@dp.callback_query(F.data == "admin_add")
+async def admin_add_callback(callback: CallbackQuery):
 
-    if not is_admin(
-        message.from_user.id
-    ):
-
-        return
-
-
-    await message.answer(
-
-        "🎬 <b>ADD VIDEO</b>\n\n"
-
-        "2 GB video ke liye:\n\n"
-
-        "1️⃣ Apne authorized Telegram USER "
-        "account ko video bhejo.\n\n"
-
-        "2️⃣ User session automatically video "
-        "process karega.\n\n"
-
-        "3️⃣ FFmpeg cover banayega.\n\n"
-
-        "4️⃣ Video directly channel mein upload hoga.",
-
-        parse_mode="HTML"
-    )
-
-
-# ============================================================
-# ADMIN CALLBACKS
-# ============================================================
-
-@dp.callback_query(
-    F.data == "add_video"
-)
-async def add_video_callback(
-    callback: CallbackQuery
-):
-
-    if not is_admin(
-        callback.from_user.id
-    ):
-
+    if not is_admin(callback.from_user.id):
         await callback.answer(
             "Access denied",
             show_alert=True
         )
-
         return
 
+    admin_state[callback.from_user.id] = "waiting_video"
 
-    await callback.message.edit_text(
-
-        "🎬 <b>ADD VIDEO</b>\n\n"
-
-        "Apne authorized Telegram USER "
-        "account ko video bhejo.\n\n"
-
-        "Maximum architecture: 2 GB\n"
-        "Automatic cover: ON\n"
-        "Channel upload: ON",
-
-        parse_mode="HTML"
+    await callback.message.answer(
+        "📤 <b>ADD VIDEO</b>\n\n"
+        "Ab video bhejo.\n\n"
+        "Multiple videos ek ke baad ek bhej sakte ho."
     )
 
     await callback.answer()
 
 
-@dp.callback_query(
-    F.data == "videos"
-)
-async def videos_callback(
-    callback: CallbackQuery
-):
+# ============================================================
+# ADMIN LIST
+# ============================================================
 
-    if not is_admin(
-        callback.from_user.id
-    ):
+@dp.callback_query(F.data == "admin_list")
+async def admin_list_callback(callback: CallbackQuery):
 
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Access denied",
+            show_alert=True
+        )
         return
 
+    if not videos:
+        await callback.message.answer(
+            "📋 <b>VIDEO LIST</b>\n\n"
+            "Abhi koi video nahi hai."
+        )
+        await callback.answer()
+        return
 
-    count = len(
-        library
-    )
+    text = "📋 <b>NIGHT HUB VIDEO LIST</b>\n\n"
+
+    for vid, data in videos.items():
+
+        title = data.get(
+            "title",
+            f"Video {vid}"
+        )
+
+        text += (
+            f"🎬 <b>{vid}</b> — "
+            f"{title}\n"
+        )
+
+    await callback.message.answer(text)
+    await callback.answer()
 
 
-    await callback.message.edit_text(
+# ============================================================
+# ADMIN DELETE
+# ============================================================
 
-        "📚 <b>VIDEO LIBRARY</b>\n\n"
+@dp.callback_query(F.data == "admin_delete")
+async def admin_delete_callback(callback: CallbackQuery):
 
-        f"🎬 Total videos: <b>{count}</b>\n\n"
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Access denied",
+            show_alert=True
+        )
+        return
 
-        "🖼️ Covers: Automatic\n"
-        "📢 Channel upload: Enabled\n"
-        "📦 2 GB architecture: Enabled",
-
-        reply_markup=InlineKeyboardMarkup(
-
-            inline_keyboard=[
-
-                [
-
-                    InlineKeyboardButton(
-                        text="⬅️ BACK",
-                        callback_data="back"
-                    )
-
-                ]
-
-            ]
-
-        ),
-
-        parse_mode="HTML"
+    await callback.message.answer(
+        "🗑 <b>DELETE VIDEO</b>\n\n"
+        "Jis video ko delete karna hai select karo:",
+        reply_markup=delete_keyboard()
     )
 
     await callback.answer()
 
 
-@dp.callback_query(
-    F.data == "channel"
-)
-async def channel_callback(
-    callback: CallbackQuery
-):
+# ============================================================
+# DELETE VIDEO
+# ============================================================
 
-    if not is_admin(
-        callback.from_user.id
-    ):
+@dp.callback_query(F.data.startswith("delete:"))
+async def delete_video_callback(callback: CallbackQuery):
 
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Access denied",
+            show_alert=True
+        )
         return
 
+    try:
+        vid = int(
+            callback.data.split(":")[1]
+        )
+    except Exception:
+        await callback.answer(
+            "Invalid video",
+            show_alert=True
+        )
+        return
 
-    await callback.message.edit_text(
+    if vid not in videos:
+        await callback.answer(
+            "Video not found",
+            show_alert=True
+        )
+        return
 
-        "📢 <b>CHANNEL</b>\n\n"
+    title = videos[vid].get(
+        "title",
+        f"Video {vid}"
+    )
 
-        f"CHANNEL_ID:\n"
-        f"<code>{CHANNEL_ID}</code>\n\n"
+    del videos[vid]
 
-        "Upload system: ✅\n"
-        "User session: ✅",
+    await callback.message.answer(
+        "✅ <b>VIDEO DELETED</b>\n\n"
+        f"🎬 {title}"
+    )
 
-        reply_markup=InlineKeyboardMarkup(
+    await callback.answer("Deleted")
 
-            inline_keyboard=[
 
-                [
+# ============================================================
+# ADMIN STATISTICS
+# ============================================================
 
-                    InlineKeyboardButton(
-                        text="⬅️ BACK",
-                        callback_data="back"
-                    )
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats_callback(callback: CallbackQuery):
 
-                ]
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Access denied",
+            show_alert=True
+        )
+        return
 
-            ]
-
-        ),
-
-        parse_mode="HTML"
+    await callback.message.answer(
+        "📊 <b>NIGHT HUB STATISTICS</b>\n\n"
+        f"🎬 Total Videos: <b>{len(videos)}</b>\n"
+        f"👑 Admin ID: <code>{ADMIN_ID}</code>\n"
+        f"📢 Channel ID: <code>{CHANNEL_ID}</code>"
     )
 
     await callback.answer()
 
 
-@dp.callback_query(
-    F.data == "status"
-)
-async def status_callback(
-    callback: CallbackQuery
-):
+# ============================================================
+# RECEIVE VIDEO
+# ============================================================
 
-    if not is_admin(
-        callback.from_user.id
-    ):
+@dp.message(F.video)
+async def video_handler(message: Message):
 
+    global video_counter
+
+    if not is_admin(message.from_user.id):
+        await message.answer(
+            "❌ Sirf admin video upload kar sakta hai."
+        )
         return
 
-
-    user_status = (
-        "🟢 Connected"
-        if user_client.is_connected
-        else
-        "🔴 Disconnected"
+    state = admin_state.get(
+        message.from_user.id
     )
 
-
-    state = (
-        "🔄 Processing"
-        if processing
-        else
-        "🟢 Idle"
-    )
-
-
-    await callback.message.edit_text(
-
-        "📊 <b>NIGHT HUB STATUS</b>\n\n"
-
-        f"🤖 Bot API: 🟢 Connected\n"
-        f"👤 User Session: {user_status}\n"
-        f"🎬 Processor: {state}\n"
-        f"📚 Library: {len(library)} videos\n"
-        f"📢 Channel: <code>{CHANNEL_ID}</code>",
-
-        reply_markup=InlineKeyboardMarkup(
-
-            inline_keyboard=[
-
-                [
-
-                    InlineKeyboardButton(
-                        text="⬅️ BACK",
-                        callback_data="back"
-                    )
-
-                ]
-
-            ]
-
-        ),
-
-        parse_mode="HTML"
-    )
-
-    await callback.answer()
-
-
-@dp.callback_query(
-    F.data == "refresh"
-)
-async def refresh_callback(
-    callback: CallbackQuery
-):
-
-    if not is_admin(
-        callback.from_user.id
-    ):
-
+    if state != "waiting_video":
+        await message.answer(
+            "ℹ️ Pehle /admin → ADD VIDEO select karo."
+        )
         return
 
+    video = message.video
 
-    await callback.message.edit_text(
-
-        admin_text(),
-
-        reply_markup=admin_keyboard(),
-
-        parse_mode="HTML"
-    )
-
-    await callback.answer(
-        "🔄 Refreshed"
-    )
-
-
-@dp.callback_query(
-    F.data == "back"
-)
-async def back_callback(
-    callback: CallbackQuery
-):
-
-    if not is_admin(
-        callback.from_user.id
-    ):
-
+    if not video:
         return
 
+    video_counter += 1
 
-    await callback.message.edit_text(
+    video_id = video_counter
 
-        admin_text(),
-
-        reply_markup=admin_keyboard(),
-
-        parse_mode="HTML"
+    title = (
+        message.caption.strip()
+        if message.caption
+        else f"Night Hub Video {video_id}"
     )
 
-    await callback.answer()
+    # --------------------------------------------------------
+    # SAVE TELEGRAM FILE_ID
+    # --------------------------------------------------------
 
+    videos[video_id] = {
+        "title": title,
+        "file_id": video.file_id,
+        "message_id": message.message_id,
+        "chat_id": message.chat.id,
+        "duration": video.duration,
+        "width": video.width,
+        "height": video.height,
+        "file_size": video.file_size,
+    }
 
-@dp.callback_query(
-    F.data == "close"
-)
-async def close_callback(
-    callback: CallbackQuery
-):
-
-    if not is_admin(
-        callback.from_user.id
-    ):
-
-        return
-
+    # --------------------------------------------------------
+    # DIRECT CHANNEL COPY
+    # --------------------------------------------------------
+    #
+    # IMPORTANT:
+    # We use copy_message instead of downloading the file.
+    #
+    # This avoids:
+    # USER_IS_BOT
+    # SESSION_STRING
+    # getFile download limitation
+    #
+    # Telegram keeps the original video content/thumbnail.
+    # --------------------------------------------------------
 
     try:
 
-        await callback.message.delete()
+        copied = await bot.copy_message(
+            chat_id=CHANNEL_ID,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id
+        )
 
+        videos[video_id]["channel_message_id"] = (
+            copied.message_id
+        )
+
+        await message.answer(
+            "✅ <b>VIDEO UPLOADED</b>\n\n"
+            f"🎬 <b>{title}</b>\n\n"
+            "📢 Channel upload successful.\n"
+            "🖼️ Telegram video thumbnail preserved.\n\n"
+            f"🆔 Video ID: <code>{video_id}</code>"
+        )
+
+    except TelegramForbiddenError:
+
+        videos.pop(video_id, None)
+
+        await message.answer(
+            "❌ <b>CHANNEL PERMISSION ERROR</b>\n\n"
+            "Bot ko channel me administrator banao.\n"
+            "Aur <b>Post Messages</b> permission enable karo."
+        )
+
+    except TelegramBadRequest as e:
+
+        videos.pop(video_id, None)
+
+        await message.answer(
+            "❌ <b>VIDEO UPLOAD FAILED</b>\n\n"
+            f"<code>{str(e)}</code>"
+        )
+
+    except Exception as e:
+
+        videos.pop(video_id, None)
+
+        logger.exception(
+            "Channel upload error: %s",
+            e
+        )
+
+        await message.answer(
+            "❌ <b>VIDEO PROCESS FAILED</b>\n\n"
+            f"<code>{str(e)}</code>"
+        )
+
+
+# ============================================================
+# DOCUMENT VIDEO SUPPORT
+# ============================================================
+
+@dp.message(F.document)
+async def document_handler(message: Message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    document = message.document
+
+    if not document:
+        return
+
+    filename = (
+        document.file_name or ""
+    ).lower()
+
+    video_extensions = (
+        ".mp4",
+        ".mkv",
+        ".webm",
+        ".mov",
+        ".m4v",
+        ".avi",
+        ".mpeg",
+        ".mpg",
+        ".3gp",
+        ".ts",
+        ".flv"
+    )
+
+    if not filename.endswith(video_extensions):
+        return
+
+    await message.answer(
+        "⚠️ <b>VIDEO DOCUMENT DETECTED</b>\n\n"
+        "Best result ke liye Telegram me video ko "
+        "<b>Video</b> ke form me upload karo, "
+        "Document ke form me nahi."
+    )
+
+
+# ============================================================
+# VIDEO WATCH CALLBACK
+# ============================================================
+
+@dp.callback_query(F.data.startswith("watch:"))
+async def watch_callback(callback: CallbackQuery):
+
+    try:
+        vid = int(
+            callback.data.split(":")[1]
+        )
     except Exception:
+        await callback.answer(
+            "Invalid video",
+            show_alert=True
+        )
+        return
 
-        pass
+    if vid not in videos:
+        await callback.answer(
+            "Video unavailable",
+            show_alert=True
+        )
+        return
 
-    await callback.answer()
+    data = videos[vid]
 
+    title = data.get(
+        "title",
+        f"Video {vid}"
+    )
 
-# ============================================================
-# COVER EXTRACTION
-# ============================================================
+    # --------------------------------------------------------
+    # MINI APP WATCH URL
+    # --------------------------------------------------------
 
-async def create_cover(
-    video_path,
-    cover_path
-):
+    if WEB_URL:
 
-    commands = [
+        separator = (
+            "&"
+            if "?" in WEB_URL
+            else "?"
+        )
 
-        [
+        watch_url = (
+            f"{WEB_URL}"
+            f"{separator}"
+            f"video={vid}"
+        )
 
-            FFMPEG,
+        if WATCH_SECRET:
+            watch_url += (
+                f"&secret={WATCH_SECRET}"
+            )
 
-            "-y",
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="▶️ WATCH VIDEO",
+                        url=watch_url
+                    )
+                ]
+            ]
+        )
 
-            "-ss",
-            "00:00:02",
+        await callback.message.answer(
+            "🎬 <b>NIGHT HUB</b>\n\n"
+            f"📺 <b>{title}</b>\n\n"
+            "👇 Video watch karne ke liye button press karo.",
+            reply_markup=keyboard
+        )
 
-            "-i",
-            str(video_path),
+    else:
 
-            "-frames:v",
-            "1",
-
-            "-q:v",
-            "2",
-
-            str(cover_path),
-
-        ],
-
-        [
-
-            FFMPEG,
-
-            "-y",
-
-            "-i",
-            str(video_path),
-
-            "-frames:v",
-            "1",
-
-            "-q:v",
-            "2",
-
-            str(cover_path),
-
-        ]
-
-    ]
-
-
-    for command in commands:
+        # ----------------------------------------------------
+        # FALLBACK
+        # ----------------------------------------------------
 
         try:
 
-            process = (
-                await asyncio
-                .create_subprocess_exec(
-                    *command,
-                    stdout=(
-                        asyncio.subprocess.PIPE
-                    ),
-                    stderr=(
-                        asyncio.subprocess.PIPE
-                    ),
+            await bot.copy_message(
+                chat_id=callback.from_user.id,
+                from_chat_id=CHANNEL_ID,
+                message_id=data.get(
+                    "channel_message_id"
                 )
             )
-
-
-            stdout, stderr = (
-                await process.communicate()
-            )
-
-
-            if (
-
-                process.returncode == 0
-
-                and cover_path.exists()
-
-                and cover_path.stat().st_size > 0
-
-            ):
-
-                return True
-
 
         except Exception as e:
 
-            print(
-                "COVER ERROR:",
-                repr(e)
+            logger.exception(
+                "Watch fallback error: %s",
+                e
             )
 
-
-        try:
-
-            if cover_path.exists():
-
-                cover_path.unlink()
-
-        except Exception:
-
-            pass
-
-
-    return False
-
-
-# ============================================================
-# PROGRESS CALLBACK
-# ============================================================
-
-async def progress_callback(
-    current,
-    total,
-    status_message,
-    operation
-):
-
-    try:
-
-        now = asyncio.get_running_loop().time()
-
-        last = getattr(
-            progress_callback,
-            "_last",
-            0
-        )
-
-
-        if now - last < 4:
-
-            return
-
-
-        progress_callback._last = now
-
-
-        percent = (
-            current / total * 100
-            if total
-            else 0
-        )
-
-
-        current_mb = (
-            current /
-            1024 /
-            1024
-        )
-
-        total_mb = (
-            total /
-            1024 /
-            1024
-        )
-
-
-        await status_message.edit_text(
-
-            "🌙 <b>NIGHT HUB</b>\n\n"
-
-            f"🎬 <b>{current_video_name}</b>\n\n"
-
-            f"{operation}\n\n"
-
-            f"📦 {current_mb:.1f} / "
-            f"{total_mb:.1f} MB\n"
-
-            f"📊 {percent:.1f}%",
-
-            parse_mode="HTML"
-        )
-
-
-    except Exception:
-
-        pass
-
-
-# ============================================================
-# DOWNLOAD USER MESSAGE
-# ============================================================
-
-async def download_user_video(
-    message,
-    output_path,
-    status_message
-):
-
-    await message.download(
-        file_name=str(output_path),
-
-        progress=progress_callback,
-
-        progress_args=(
-            status_message,
-            "⬇️ Downloading video..."
-        )
-    )
-
-
-# ============================================================
-# PUBLISH VIDEO TO CHANNEL
-# ============================================================
-
-async def publish_to_channel(
-    video_path,
-    cover_path,
-    file_name,
-    status_message
-):
-
-    caption = (
-
-        "🌙 <b>NIGHT HUB</b>\n\n"
-
-        f"🎬 <b>{file_name}</b>\n\n"
-
-        "🖼️ Automatic Cover: "
-        f"{'✅' if cover_path else '⚠️'}\n"
-
-        "📺 Online Player: ✅\n\n"
-
-        "━━━━━━━━━━━━━━━━━━━━"
-    )
-
-
-    await status_message.edit_text(
-
-        "📢 <b>UPLOADING TO CHANNEL...</b>\n\n"
-
-        f"🎬 {file_name}\n\n"
-
-        "⏳ Please wait...",
-
-        parse_mode="HTML"
-    )
-
-
-    sent = await user_client.send_video(
-
-        chat_id=CHANNEL_ID,
-
-        video=str(video_path),
-
-        thumb=(
-            str(cover_path)
-            if cover_path
-            else None
-        ),
-
-        caption=caption,
-
-        parse_mode="html",
-
-        supports_streaming=True,
-
-        progress=progress_callback,
-
-        progress_args=(
-            status_message,
-            "📤 Uploading to channel..."
-        )
-    )
-
-
-    return sent
-
-
-# ============================================================
-# PROCESS VIDEO
-# ============================================================
-
-async def process_user_video(
-    message: PyroMessage
-):
-
-    global processing
-
-    global current_video_name
-
-
-    if processing:
-
-        try:
-
-            await message.reply_text(
-                "⏳ NIGHT HUB is already processing another video."
+            await callback.message.answer(
+                "❌ Video abhi available nahi hai."
             )
 
-        except Exception:
+    await callback.answer()
 
-            pass
 
+# ============================================================
+# NOTHING CALLBACK
+# ============================================================
+
+@dp.callback_query(F.data == "nothing")
+async def nothing_callback(callback: CallbackQuery):
+
+    await callback.answer(
+        "Abhi koi video nahi hai.",
+        show_alert=True
+    )
+
+
+# ============================================================
+# UNKNOWN TEXT
+# ============================================================
+
+@dp.message()
+async def unknown_handler(message: Message):
+
+    if message.text == "/start":
         return
 
+    if message.from_user and is_admin(
+        message.from_user.id
+    ):
 
-    if message.from_user:
+        if message.text:
 
-        if (
-            message.from_user.id
-            != ADMIN_ID
-        ):
-
-            return
-
-
-    media = (
-        message.video
-        or message.document
-    )
-
-
-    if not media:
-
-        return
-
-
-    file_name = (
-        getattr(
-            media,
-            "file_name",
-            None
-        )
-        or
-        "video.mp4"
-    )
-
-
-    if not Path(
-        file_name
-    ).suffix.lower() in VIDEO_EXTENSIONS:
-
-        if not message.video:
-
-            return
-
-
-    processing = True
-
-    current_video_name = file_name
-
-
-    temporary_directory = Path(
-        tempfile.mkdtemp(
-            prefix="night_hub_"
-        )
-    )
-
-
-    video_path = (
-        temporary_directory /
-        Path(file_name).name
-    )
-
-
-    cover_path = (
-        temporary_directory /
-        "cover.jpg"
-    )
-
-
-    status_message = None
-
-
-    try:
-
-        status_message = await message.reply_text(
-
-            "🌙 <b>NIGHT HUB</b>\n\n"
-
-            f"🎬 <b>{file_name}</b>\n\n"
-
-            "📦 Video received.\n"
-            "⬇️ Starting download...",
-
-            parse_mode="html"
-        )
-
-
-        # ----------------------------------------------------
-        # DOWNLOAD
-        # ----------------------------------------------------
-
-        await download_user_video(
-
-            message,
-
-            video_path,
-
-            status_message
-        )
-
-
-        if not video_path.exists():
-
-            raise RuntimeError(
-                "Video download failed."
+            await message.answer(
+                "👑 <b>NIGHT HUB ADMIN</b>\n\n"
+                "Commands:\n"
+                "/admin — Admin Panel"
             )
 
+    else:
 
-        # ----------------------------------------------------
-        # COVER
-        # ----------------------------------------------------
-
-        await status_message.edit_text(
-
-            "🖼️ <b>CREATING VIDEO COVER...</b>\n\n"
-
-            f"🎬 {file_name}\n\n"
-
-            "⏳ FFmpeg processing...",
-
-            parse_mode="HTML"
-        )
-
-
-        cover_created = (
-            await create_cover(
-                video_path,
-                cover_path
-            )
-        )
-
-
-        # ----------------------------------------------------
-        # CHANNEL UPLOAD
-        # ----------------------------------------------------
-
-        sent = await publish_to_channel(
-
-            video_path=video_path,
-
-            cover_path=(
-                cover_path
-                if cover_created
+        await message.answer(
+            get_start_text(),
+            reply_markup=(
+                video_keyboard()
+                if videos
                 else None
-            ),
-
-            file_name=file_name,
-
-            status_message=status_message
-        )
-
-
-        # ----------------------------------------------------
-        # SAVE LIBRARY
-        # ----------------------------------------------------
-
-        message_id = (
-            sent.id
-        )
-
-
-        media_type = "video"
-
-
-        library[str(message_id)] = {
-
-            "message_id":
-                message_id,
-
-            "channel_id":
-                CHANNEL_ID,
-
-            "name":
-                file_name,
-
-            "size":
-                int(
-                    getattr(
-                        media,
-                        "file_size",
-                        0
-                    )
-                    or
-                    0
-                ),
-
-            "cover":
-                bool(
-                    cover_created
-                ),
-
-            "created":
-                int(
-                    asyncio
-                    .get_running_loop()
-                    .time()
-                ),
-
-            "media_type":
-                media_type,
-        }
-
-
-        save_library()
-
-
-        # ----------------------------------------------------
-        # SUCCESS
-        # ----------------------------------------------------
-
-        await status_message.edit_text(
-
-            "✅ <b>VIDEO PUBLISHED SUCCESSFULLY</b>\n\n"
-
-            f"🎬 <b>{file_name}</b>\n\n"
-
-            f"🖼️ Cover: "
-            f"{'✅' if cover_created else '⚠️'}\n"
-
-            "📢 Channel Upload: ✅\n"
-
-            "📦 2 GB Architecture: ✅\n"
-
-            "👤 User Session: ✅\n\n"
-
-            f"🆔 Message ID: "
-            f"<code>{message_id}</code>",
-
-            parse_mode="HTML"
-        )
-
-
-        print(
-            "VIDEO PUBLISHED:",
-            file_name,
-            message_id
-        )
-
-
-    except Exception as error:
-
-        print(
-            "VIDEO PROCESS ERROR:",
-            repr(error)
-        )
-
-
-        error_text = str(
-            error
-        ).replace(
-            "<",
-            "&lt;"
-        ).replace(
-            ">",
-            "&gt;"
-        )
-
-
-        if status_message:
-
-            try:
-
-                await status_message.edit_text(
-
-                    "❌ <b>VIDEO PROCESS FAILED</b>\n\n"
-
-                    f"<code>{error_text[:3500]}</code>\n\n"
-
-                    "⚠️ Check Railway logs.",
-
-                    parse_mode="HTML"
-                )
-
-            except Exception:
-
-                pass
-
-
-    finally:
-
-        processing = False
-
-        current_video_name = ""
-
-
-        shutil.rmtree(
-            temporary_directory,
-            ignore_errors=True
+            )
         )
 
 
 # ============================================================
-# PYROGRAM USER MESSAGE HANDLER
-#
-# THIS IS WHERE 2 GB VIDEO ENTERS THE SYSTEM.
-#
-# The video must be sent to the authorized USER account.
+# HEALTH CHECK SERVER
 # ============================================================
 
-@user_client.on_message(
-    filters.private
-    & filters.user(ADMIN_ID)
-    & (
-        filters.video
-        | filters.document
-    )
-)
-async def user_video_handler(
-    client,
-    message
-):
-
-    await process_user_video(
-        message
-    )
-
-
-# ============================================================
-# PYROGRAM STARTUP
-# ============================================================
-
-async def start_user_client():
-
-    print(
-        "Starting Telegram USER session..."
-    )
-
-
-    await user_client.start()
-
-
-    me = await user_client.get_me()
-
-
-    print(
-        "=========================================="
-    )
-
-    print(
-        "NIGHT HUB USER SESSION CONNECTED"
-    )
-
-    print(
-        f"User ID: {me.id}"
-    )
-
-    print(
-        f"Username: @{me.username}"
-    )
-
-    print(
-        "2 GB USER SESSION: ENABLED"
-    )
-
-    print(
-        "=========================================="
-    )
-
-
-# ============================================================
-# WEB SERVER
-# ============================================================
-
-async def health(
-    request
-):
-
-    return web.json_response({
-
-        "status":
-            "online",
-
-        "bot":
-            "NIGHT HUB",
-
-        "user_session":
-            user_client.is_connected,
-
-        "processing":
-            processing,
-
-        "videos":
-            len(library),
-
-    })
-
-
-async def home(
-    request
-):
-
-    html_page = """
-
-<!DOCTYPE html>
-
-<html>
-
-<head>
-
-<meta charset="UTF-8">
-
-<meta name="viewport"
-content="width=device-width,initial-scale=1">
-
-<title>NIGHT HUB</title>
-
-<style>
-
-body {
-    margin: 0;
-    background: #050507;
-    color: white;
-    font-family: Arial, sans-serif;
-    text-align: center;
-}
-
-.container {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.card {
-    padding: 30px;
-    border-radius: 24px;
-    background: #111116;
-    border: 1px solid #292930;
-}
-
-.logo {
-    font-size: 55px;
-}
-
-.title {
-    font-size: 30px;
-    font-weight: 900;
-}
-
-.sub {
-    margin-top: 10px;
-    color: #888;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="container">
-
-<div class="card">
-
-<div class="logo">
-🌙
-</div>
-
-<div class="title">
-NIGHT HUB
-</div>
-
-<div class="sub">
-Online Video Platform
-</div>
-
-</div>
-
-</div>
-
-</body>
-
-</html>
-
-"""
-
-
+async def health_handler(request):
     return web.Response(
-        text=html_page,
-        content_type="text/html"
+        text="NIGHT HUB is running"
     )
 
 
@@ -1541,134 +750,34 @@ async def start_web_server():
 
     app = web.Application()
 
-
     app.router.add_get(
         "/",
-        home
+        health_handler
     )
-
 
     app.router.add_get(
         "/health",
-        health
+        health_handler
     )
 
-
-    runner = web.AppRunner(
-        app
-    )
-
+    runner = web.AppRunner(app)
 
     await runner.setup()
 
-
     site = web.TCPSite(
-
         runner,
-
         "0.0.0.0",
-
         PORT
     )
 
-
     await site.start()
 
-
-    print(
-        "=========================================="
+    logger.info(
+        "Health server running on port %s",
+        PORT
     )
 
-    print(
-        "NIGHT HUB WEB SERVER STARTED"
-    )
-
-    print(
-        f"PORT: {PORT}"
-    )
-
-    print(
-        f"WEB URL: {WEB_URL}"
-    )
-
-    print(
-        "=========================================="
-    )
-
-
-# ============================================================
-# BOT COMMANDS
-# ============================================================
-
-async def setup_commands():
-
-    try:
-
-        from aiogram.types import (
-            BotCommand,
-            BotCommandScopeDefault,
-            BotCommandScopeChat,
-        )
-
-
-        await bot.set_my_commands(
-
-            [
-
-                BotCommand(
-                    command="start",
-                    description="Start NIGHT HUB"
-                ),
-
-                BotCommand(
-                    command="admin",
-                    description="Admin Panel"
-                ),
-
-                BotCommand(
-                    command="addvideo",
-                    description="Add Video"
-                ),
-
-            ],
-
-            scope=BotCommandScopeDefault()
-        )
-
-
-        await bot.set_my_commands(
-
-            [
-
-                BotCommand(
-                    command="start",
-                    description="Start NIGHT HUB"
-                ),
-
-                BotCommand(
-                    command="admin",
-                    description="Admin Panel"
-                ),
-
-                BotCommand(
-                    command="addvideo",
-                    description="Add Video"
-                ),
-
-            ],
-
-            scope=BotCommandScopeChat(
-                chat_id=ADMIN_ID
-            )
-        )
-
-
-    except Exception as error:
-
-        print(
-            "COMMAND SETUP ERROR:",
-            repr(error)
-        )
+    return runner
 
 
 # ============================================================
@@ -1677,61 +786,56 @@ async def setup_commands():
 
 async def main():
 
-    print()
-    print(
-        "=========================================="
-    )
-    print(
-        "        🌙 NIGHT HUB STARTING"
-    )
-    print(
-        "=========================================="
+    logger.info(
+        "========================================"
     )
 
-
-    # --------------------------------------------------------
-    # BOT API TEST
-    # --------------------------------------------------------
-
-    bot_info = await bot.get_me()
-
-
-    print(
-        f"Bot: @{bot_info.username}"
+    logger.info(
+        "       NIGHT HUB BOT STARTING"
     )
 
+    logger.info(
+        "========================================"
+    )
 
-    # --------------------------------------------------------
-    # USER SESSION
-    # --------------------------------------------------------
+    logger.info(
+        "Admin ID: %s",
+        ADMIN_ID
+    )
 
-    await start_user_client()
+    logger.info(
+        "Channel ID: %s",
+        CHANNEL_ID
+    )
 
+    logger.info(
+        "Web URL: %s",
+        WEB_URL or "Not configured"
+    )
 
-    # --------------------------------------------------------
-    # COMMANDS
-    # --------------------------------------------------------
-
-    await setup_commands()
-
+    logger.info(
+        "SESSION_STRING: NOT USED"
+    )
 
     # --------------------------------------------------------
     # WEB SERVER
     # --------------------------------------------------------
 
-    await start_web_server()
-
+    runner = await start_web_server()
 
     # --------------------------------------------------------
-    # START BOT API POLLING
+    # BOT
     # --------------------------------------------------------
-
-    print(
-        "Bot API polling started..."
-    )
-
 
     try:
+
+        await bot.delete_webhook(
+            drop_pending_updates=True
+        )
+
+        logger.info(
+            "NIGHT HUB bot polling started"
+        )
 
         await dp.start_polling(
             bot
@@ -1739,22 +843,9 @@ async def main():
 
     finally:
 
-        try:
+        await runner.cleanup()
 
-            await user_client.stop()
-
-        except Exception:
-
-            pass
-
-
-        try:
-
-            await bot.session.close()
-
-        except Exception:
-
-            pass
+        await bot.session.close()
 
 
 # ============================================================
@@ -1764,20 +855,17 @@ async def main():
 if __name__ == "__main__":
 
     try:
-
-        asyncio.run(
-            main()
-        )
+        asyncio.run(main())
 
     except KeyboardInterrupt:
 
-        print(
-            "NIGHT HUB stopped."
+        logger.info(
+            "NIGHT HUB stopped"
         )
 
-    except Exception as error:
+    except Exception as e:
 
-        print(
-            "FATAL ERROR:",
-            repr(error)
+        logger.exception(
+            "Fatal error: %s",
+            e
         )
